@@ -1,0 +1,28 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# vcpkg local install cache
+vcpkg_installed/
+
+# Visual Studio / VSCode
+.vs/
+.vscode/*
+!.vscode/c_cpp_properties.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+
+# Compiled artifacts
+*.obj
+*.o
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# AI test mode logs
+logs/

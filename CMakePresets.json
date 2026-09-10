@@ -1,0 +1,25 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-ninja-msvc",
+      "displayName": "Windows (MSVC + Ninja + vcpkg)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      },
+      "environment": {
+        "VCPKG_ROOT": "D:/Visual Studio2026/VC/vcpkg"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-ninja-msvc",
+      "configurePreset": "windows-ninja-msvc"
+    }
+  ]
+}
