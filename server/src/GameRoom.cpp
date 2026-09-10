@@ -161,7 +161,7 @@ void GameRoom::broadcast_board_info()
     // than repeated in every round_start.
     nlohmann::json rooms = nlohmann::json::array();
     for (const auto& r : data_.map.rooms) {
-        rooms.push_back({{"id", r.id}, {"name", r.name}, {"x", r.x}, {"y", r.y}, {"w", r.w}, {"h", r.h}});
+        rooms.push_back({{"id", r.id}, {"name", r.name}});
     }
     nlohmann::json edges = nlohmann::json::array();
     for (const auto& [a, b] : data_.map.edges) edges.push_back({a, b});

@@ -10,7 +10,6 @@ namespace mom {
 struct RoomDef {
     std::string id;
     std::string name;
-    double x = 0, y = 0, w = 0, h = 0;
 };
 
 struct WeaponDef {

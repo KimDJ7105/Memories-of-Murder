@@ -17,7 +17,7 @@
 | type | 필드 | 설명 |
 |---|---|---|
 | `joined` | `player_id` | join 성공 응답 |
-| `board_info` | `map{id,name,image}`, `rooms[{id,name,x,y,w,h}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 게임 시작 시 1회만 전송되는 정적 데이터. 지도(방+좌표+연결 관계)와 흉기 후보 — 라운드마다 반복되지 않음. `rooms`의 좌표는 클라이언트가 도면을 그리는 용도, `image`는 지금은 항상 null(추후 배경 이미지 지원용) |
+| `board_info` | `map{id,name,image}`, `rooms[{id,name}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 게임 시작 시 1회만 전송되는 정적 데이터. 지도(방+연결 관계)와 흉기 후보 — 라운드마다 반복되지 않음. `image`는 지금은 항상 null(추후 배경 이미지 지원용) |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
@@ -55,7 +55,9 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
 
 ## 지도/흉기는 코드가 아니라 파일
 
-`server/data/maps/mansion.json`과 `server/data/weapons.json`이 실제 정의다 (`server/include/GameData.hpp`가 로딩). 새 지도를 추가하고 싶으면 같은 스키마로 JSON 파일을 하나 더 만들면 되고, `image` 필드에 배경 이미지 경로를 채우면(현재는 항상 null) 클라이언트가 나중에 그 이미지를 지도 배경으로 쓰고 `rooms`의 x/y/w/h는 그 이미지 위에 겹치는 클릭 가능 영역/좌표로 쓸 수 있다. 지금은 이미지가 없어서 클라이언트가 좌표만으로 도식적인 사각형 지도를 그린다.
+`server/data/maps/mansion.json`과 `server/data/weapons.json`이 실제 정의다 (`server/include/GameData.hpp`가 로딩). 새 지도를 추가하고 싶으면 같은 스키마로 JSON 파일을 하나 더 만들면 된다.
+
+지도 데이터는 순수하게 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다. 클라이언트는 지금 이 데이터를 방 이름 + 인접한 방 목록으로 된 텍스트 목록으로만 보여준다. `image` 필드는 나중에 실제 배경 이미지를 붙이게 될 때를 위해 남겨둔 자리이며, 그때 가서 이미지 위에 방 영역을 표시(클릭/강조 등)해야 하는 구체적인 기능이 생기면 그때 좌표를 추가하면 된다 — 지금은 그런 기능이 없어서 좌표를 미리 넣지 않았다.
 
 ## Phase 1의 임시 구현
 

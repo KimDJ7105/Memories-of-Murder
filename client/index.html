@@ -87,13 +87,12 @@
   .role-banner.criminal { background: #e5c9c9; }
   .role-banner.detective { background: #c9d3e5; }
 
-  #map-wrap { text-align: center; margin-bottom: 14px; }
-  #map-wrap svg { max-width: 100%; height: auto; }
-  .room-rect { fill: #ddceac; stroke: var(--ink); stroke-width: 2; }
-  .room-rect.active { fill: var(--accent); opacity: 0.85; }
-  .room-label { font-family: Georgia, serif; font-size: 11px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
-  .room-rect.active + .room-label { fill: #fff; font-weight: bold; }
-  .room-edge { stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  #map-wrap { margin-bottom: 14px; font-size: 0.9em; }
+  #map-wrap .map-name { font-weight: bold; margin-bottom: 6px; }
+  #map-wrap ul { list-style: none; padding: 0; margin: 0; }
+  #map-wrap li { padding: 2px 0; }
+  #map-wrap .room-name { font-weight: bold; }
+  #map-wrap .room-links { color: var(--ink-faded); }
 
   #weapon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
   .weapon-btn {
@@ -138,12 +137,8 @@
   <h2 id="round-title"></h2>
 
   <div id="map-wrap">
-    <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
-      <rect x="1" y="1" width="298" height="198" fill="none" stroke="#8a7a55" stroke-width="1"/>
-      <g id="edges"></g>
-      <g id="rooms"></g>
-    </svg>
-    <p style="font-size:0.8em; color:var(--ink-faded); margin-top:4px;">참고용 지도 — 범인은 이 중 한 곳을 글 속에 자연스럽게 써서 묘사합니다.</p>
+    <p class="map-name" id="map-name"></p>
+    <ul id="map-rooms"></ul>
   </div>
 
   <div id="role-banner" class="role-banner"></div>
@@ -199,7 +194,6 @@ let myRole = null;
 let players = [];
 let roomState = 'Lobby';
 let availableWeapons = [];
-let mapRooms = [];
 let selectedWeapon = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
@@ -229,14 +223,12 @@ function handleMessage(msg) {
       if (roomState === 'Lobby') { show('lobby-screen'); hide('round-screen'); hide('result-screen'); }
       break;
     case 'board_info':
-      mapRooms = msg.rooms;
       availableWeapons = msg.weapons;
-      renderMap(msg.rooms, msg.edges);
+      renderMap(msg.map, msg.rooms, msg.edges);
       break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
       $('round-title').textContent = `라운드 ${msg.round}`;
-      clearRoomHighlights();
       selectedWeapon = null;
       $('investigation-log').innerHTML = '';
       hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
@@ -297,52 +289,18 @@ function handleMessage(msg) {
   }
 }
 
-function renderMap(rooms, edges) {
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const centerOf = (id) => {
-    const r = rooms.find(r => r.id === id);
-    return r ? [r.x + r.w / 2, r.y + r.h / 2] : [0, 0];
-  };
+function renderMap(map, rooms, edges) {
+  $('map-name').textContent = `지도: ${map.name} — 범인은 아래 방 중 한 곳을 글 속에 자연스럽게 써서 묘사합니다.`;
 
-  const edgeGroup = $('edges');
-  edgeGroup.innerHTML = '';
-  edges.forEach(([a, b]) => {
-    const [x1, y1] = centerOf(a);
-    const [x2, y2] = centerOf(b);
-    const line = document.createElementNS(svgNS, 'line');
-    line.setAttribute('class', 'room-edge');
-    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-    edgeGroup.appendChild(line);
-  });
+  const neighborsOf = (id) => edges
+    .filter(([a, b]) => a === id || b === id)
+    .map(([a, b]) => (a === id ? b : a))
+    .map(nid => rooms.find(r => r.id === nid)?.name ?? nid);
 
-  const roomGroup = $('rooms');
-  roomGroup.innerHTML = '';
-  rooms.forEach(r => {
-    const rect = document.createElementNS(svgNS, 'rect');
-    rect.setAttribute('id', 'room-' + r.id);
-    rect.setAttribute('class', 'room-rect');
-    rect.setAttribute('x', r.x); rect.setAttribute('y', r.y);
-    rect.setAttribute('width', r.w); rect.setAttribute('height', r.h);
-    roomGroup.appendChild(rect);
-
-    const text = document.createElementNS(svgNS, 'text');
-    text.setAttribute('class', 'room-label');
-    text.setAttribute('x', r.x + r.w / 2);
-    text.setAttribute('y', r.y + r.h / 2 + 4);
-    text.textContent = r.name;
-    roomGroup.appendChild(text);
-  });
-}
-
-function clearRoomHighlights() {
-  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active'));
-}
-
-function highlightRoom(locationId) {
-  clearRoomHighlights();
-  const el = document.getElementById('room-' + locationId);
-  if (el) el.classList.add('active');
+  $('map-rooms').innerHTML = rooms.map(r => {
+    const links = neighborsOf(r.id).join(', ');
+    return `<li><span class="room-name">${r.name}</span> <span class="room-links">— 연결: ${links}</span></li>`;
+  }).join('');
 }
 
 function renderWeaponPicker() {

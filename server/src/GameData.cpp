@@ -35,10 +35,6 @@ MapDef parse_map(const nlohmann::json& j)
         RoomDef room;
         room.id = r.at("id").get<std::string>();
         room.name = r.at("name").get<std::string>();
-        room.x = r.value("x", 0.0);
-        room.y = r.value("y", 0.0);
-        room.w = r.value("w", 0.0);
-        room.h = r.value("h", 0.0);
         map.rooms.push_back(std::move(room));
     }
     for (const auto& e : j.at("edges")) {
