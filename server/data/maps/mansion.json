@@ -1,0 +1,22 @@
+{
+  "id": "mansion",
+  "name": "낡은 저택",
+  "image": null,
+  "rooms": [
+    {"id": "attic", "name": "다락방", "x": 2, "y": 2, "w": 98, "h": 98},
+    {"id": "library", "name": "서재", "x": 101, "y": 2, "w": 98, "h": 98},
+    {"id": "garden", "name": "정원", "x": 200, "y": 2, "w": 98, "h": 98},
+    {"id": "garage", "name": "차고", "x": 2, "y": 101, "w": 98, "h": 97},
+    {"id": "kitchen", "name": "주방", "x": 101, "y": 101, "w": 98, "h": 97},
+    {"id": "basement", "name": "지하실", "x": 200, "y": 101, "w": 98, "h": 97}
+  ],
+  "edges": [
+    ["attic", "library"],
+    ["library", "garden"],
+    ["garage", "kitchen"],
+    ["kitchen", "basement"],
+    ["attic", "garage"],
+    ["library", "kitchen"],
+    ["garden", "basement"]
+  ]
+}

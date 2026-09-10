@@ -90,9 +90,6 @@
   #map-wrap { text-align: center; margin-bottom: 14px; }
   #map-wrap svg { max-width: 100%; height: auto; }
   .room-rect { fill: #ddceac; stroke: var(--ink); stroke-width: 2; }
-  .room-rect.selectable { cursor: pointer; }
-  .room-rect.selectable:hover { fill: #e8dcb8; }
-  .room-rect.selected { fill: #d8b34a; }
   .room-rect.active { fill: var(--accent); opacity: 0.85; }
   .room-label { font-family: Georgia, serif; font-size: 11px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
   .room-rect.active + .room-label { fill: #fff; font-weight: bold; }
@@ -144,25 +141,15 @@
     <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
       <rect x="1" y="1" width="298" height="198" fill="none" stroke="#8a7a55" stroke-width="1"/>
       <g id="edges"></g>
-      <rect id="room-attic" class="room-rect" x="2" y="2" width="98" height="98"/>
-      <text class="room-label" x="51" y="55">다락방</text>
-      <rect id="room-library" class="room-rect" x="101" y="2" width="98" height="98"/>
-      <text class="room-label" x="150" y="55">서재</text>
-      <rect id="room-garden" class="room-rect" x="200" y="2" width="98" height="98"/>
-      <text class="room-label" x="249" y="55">정원</text>
-      <rect id="room-garage" class="room-rect" x="2" y="101" width="98" height="97"/>
-      <text class="room-label" x="51" y="154">차고</text>
-      <rect id="room-kitchen" class="room-rect" x="101" y="101" width="98" height="97"/>
-      <text class="room-label" x="150" y="154">주방</text>
-      <rect id="room-basement" class="room-rect" x="200" y="101" width="98" height="97"/>
-      <text class="room-label" x="249" y="154">지하실</text>
+      <g id="rooms"></g>
     </svg>
+    <p style="font-size:0.8em; color:var(--ink-faded); margin-top:4px;">참고용 지도 — 범인은 이 중 한 곳을 글 속에 자연스럽게 써서 묘사합니다.</p>
   </div>
 
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
-    <p>지도에서 범행 장소를 클릭하고, 흉기를 선택한 뒤, 범행을 자유롭게 서술하세요.</p>
+    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요. (범행 장소는 위 지도에 있는 방 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
     <div id="weapon-picker"></div>
     <textarea id="crime-text"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
@@ -205,10 +192,6 @@ const $ = (id) => document.getElementById(id);
 const log = (line) => { $('log').textContent += line + "\n"; $('log').scrollTop = $('log').scrollHeight; };
 
 const WEAPON_ICONS = { knife: '🔪', blunt: '🔨', rope: '🪢', poison: '🧪', gun: '🔫', candlestick: '🕯️' };
-const ROOM_CENTERS = {
-  attic: [51, 51], library: [150, 51], garden: [249, 51],
-  garage: [51, 149.5], kitchen: [150, 149.5], basement: [249, 149.5],
-};
 
 let ws = null;
 let myId = null;
@@ -216,8 +199,8 @@ let myRole = null;
 let players = [];
 let roomState = 'Lobby';
 let availableWeapons = [];
+let mapRooms = [];
 let selectedWeapon = null;
-let selectedLocation = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
 
@@ -246,15 +229,15 @@ function handleMessage(msg) {
       if (roomState === 'Lobby') { show('lobby-screen'); hide('round-screen'); hide('result-screen'); }
       break;
     case 'board_info':
+      mapRooms = msg.rooms;
       availableWeapons = msg.weapons;
-      renderMapStructure(msg.edges);
+      renderMap(msg.rooms, msg.edges);
       break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
       $('round-title').textContent = `라운드 ${msg.round}`;
       clearRoomHighlights();
       selectedWeapon = null;
-      selectedLocation = null;
       $('investigation-log').innerHTML = '';
       hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
       stopAdvanceCountdown();
@@ -266,7 +249,6 @@ function handleMessage(msg) {
       banner.className = 'role-banner ' + myRole;
       if (myRole === 'criminal') {
         renderWeaponPicker();
-        enableRoomPicking();
         $('crime-text').value = '';
         show('crime-writing-box'); hide('waiting-box');
       } else {
@@ -315,47 +297,52 @@ function handleMessage(msg) {
   }
 }
 
-function renderMapStructure(edges) {
+function renderMap(rooms, edges) {
   const svgNS = 'http://www.w3.org/2000/svg';
-  const group = $('edges');
-  group.innerHTML = '';
+  const centerOf = (id) => {
+    const r = rooms.find(r => r.id === id);
+    return r ? [r.x + r.w / 2, r.y + r.h / 2] : [0, 0];
+  };
+
+  const edgeGroup = $('edges');
+  edgeGroup.innerHTML = '';
   edges.forEach(([a, b]) => {
-    const [x1, y1] = ROOM_CENTERS[a] ?? [0, 0];
-    const [x2, y2] = ROOM_CENTERS[b] ?? [0, 0];
+    const [x1, y1] = centerOf(a);
+    const [x2, y2] = centerOf(b);
     const line = document.createElementNS(svgNS, 'line');
     line.setAttribute('class', 'room-edge');
     line.setAttribute('x1', x1); line.setAttribute('y1', y1);
     line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-    group.appendChild(line);
+    edgeGroup.appendChild(line);
+  });
+
+  const roomGroup = $('rooms');
+  roomGroup.innerHTML = '';
+  rooms.forEach(r => {
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('id', 'room-' + r.id);
+    rect.setAttribute('class', 'room-rect');
+    rect.setAttribute('x', r.x); rect.setAttribute('y', r.y);
+    rect.setAttribute('width', r.w); rect.setAttribute('height', r.h);
+    roomGroup.appendChild(rect);
+
+    const text = document.createElementNS(svgNS, 'text');
+    text.setAttribute('class', 'room-label');
+    text.setAttribute('x', r.x + r.w / 2);
+    text.setAttribute('y', r.y + r.h / 2 + 4);
+    text.textContent = r.name;
+    roomGroup.appendChild(text);
   });
 }
 
 function clearRoomHighlights() {
-  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active', 'selected'));
+  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active'));
 }
 
 function highlightRoom(locationId) {
   clearRoomHighlights();
   const el = document.getElementById('room-' + locationId);
   if (el) el.classList.add('active');
-}
-
-function enableRoomPicking() {
-  document.querySelectorAll('.room-rect').forEach(r => {
-    r.classList.add('selectable');
-    r.onclick = () => {
-      selectedLocation = r.id.replace('room-', '');
-      document.querySelectorAll('.room-rect').forEach(x => x.classList.remove('selected'));
-      r.classList.add('selected');
-    };
-  });
-}
-
-function disableRoomPicking() {
-  document.querySelectorAll('.room-rect').forEach(r => {
-    r.classList.remove('selectable');
-    r.onclick = null;
-  });
 }
 
 function renderWeaponPicker() {
@@ -452,10 +439,8 @@ $('start-btn').onclick = () => send({ type: 'start_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;
-  if (!selectedLocation) { alert('지도에서 범행 장소를 선택하세요.'); return; }
   if (!selectedWeapon) { alert('흉기를 선택하세요.'); return; }
-  send({ type: 'submit_crime', text, weapon: selectedWeapon, location: selectedLocation });
-  disableRoomPicking();
+  send({ type: 'submit_crime', text, weapon: selectedWeapon });
   hide('crime-writing-box'); show('waiting-box');
   $('waiting-message').textContent = 'AI가 범행을 평가하는 중...';
 };

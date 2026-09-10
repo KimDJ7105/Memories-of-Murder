@@ -5,6 +5,7 @@
 
 #include <boost/asio/io_context.hpp>
 
+#include "GameData.hpp"
 #include "GameRoom.hpp"
 #include "MessageSender.hpp"
 #include "Session.hpp"
@@ -26,6 +27,9 @@ public:
 
 private:
     std::map<int, std::shared_ptr<Session>> sessions_;
+    // Declared before room_ so it's constructed first and outlives the
+    // GameRoom that holds a reference to it.
+    GameData game_data_;
     GameRoom room_;
 };
 

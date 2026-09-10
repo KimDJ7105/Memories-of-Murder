@@ -1,0 +1,8 @@
+[
+  {"id": "knife", "name": "칼"},
+  {"id": "blunt", "name": "둔기"},
+  {"id": "rope", "name": "밧줄"},
+  {"id": "poison", "name": "독약"},
+  {"id": "gun", "name": "총"},
+  {"id": "candlestick", "name": "촛대"}
+]

@@ -13,6 +13,7 @@
 
 #include "Crime.hpp"
 #include "CrimeEvaluator.hpp"
+#include "GameData.hpp"
 #include "GameTypes.hpp"
 #include "GuessJudge.hpp"
 #include "MessageSender.hpp"
@@ -26,13 +27,17 @@ namespace mom {
 // single GameRoom directly inside GameServer; a RoomManager can wrap many
 // of these later (Phase 3) without GameRoom itself changing.
 //
-// The map (rooms + adjacency) and the weapon list are static board data,
-// not per-round state — the server never picks a location or weapon for a
-// round. The criminal freely chooses both when submitting the crime, so
-// both are secret (like the confession text) until `round_result` reveals
-// them. Room adjacency exists for future evaluators to judge movement
-// plausibility (docs/DESIGN.md section 7's "이동 및 실행 가능성"); Phase 1's
-// mock evaluator doesn't use it yet.
+// The map (rooms + adjacency) and the weapon list are static board data
+// loaded from server/data/*.json (see GameData) — not per-round state, and
+// never picked by the server. The criminal writes the crime as free text
+// (no location/weapon UI selection beyond picking a weapon); the location
+// is extracted from that text by matching it against the map's room names
+// (GameData::extract_room_mention — a placeholder for real AI extraction
+// in Phase 2). Both location and weapon stay secret, like the confession
+// text itself, until `round_result` reveals them. Room adjacency exists
+// for future evaluators to judge movement plausibility (docs/DESIGN.md
+// section 7's "이동 및 실행 가능성"); Phase 1's mock evaluator doesn't use
+// it yet.
 //
 // Investigation is turn-based: detectives take one guess at a time in a
 // rotating queue (`pending_order_`), each guess gets immediate public
@@ -42,6 +47,7 @@ namespace mom {
 class GameRoom {
 public:
     GameRoom(boost::asio::io_context& ioc,
+              const GameData& data,
               MessageSender& sender,
               std::unique_ptr<ICrimeEvaluator> evaluator,
               std::unique_ptr<IGuessJudge> judge);
@@ -76,6 +82,7 @@ private:
     Player* find_player(int player_id);
 
     boost::asio::io_context& ioc_;
+    const GameData& data_;
     MessageSender& sender_;
     std::unique_ptr<ICrimeEvaluator> evaluator_;
     std::unique_ptr<IGuessJudge> judge_;

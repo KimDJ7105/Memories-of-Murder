@@ -16,84 +16,15 @@ constexpr double kAttemptMultipliers[kMaxAttempts] = {1.0, 0.9, 0.8};
 constexpr int kCorrectBonus = 10;
 constexpr int kTurnSeconds = 10;
 
-struct NamedThing {
-    std::string id;
-    std::string name;
-};
-
-// Static board data. The server never picks a room for a round — the
-// criminal chooses one when submitting the crime, so adjacency exists
-// only to be handed to clients (and, later, an AI evaluator) as data.
-const std::vector<NamedThing> kRooms = {
-    {"kitchen", "주방"},
-    {"library", "서재"},
-    {"garage", "차고"},
-    {"garden", "정원"},
-    {"basement", "지하실"},
-    {"attic", "다락방"},
-};
-
-const std::vector<std::pair<std::string, std::string>> kRoomEdges = {
-    {"attic", "library"},
-    {"library", "garden"},
-    {"garage", "kitchen"},
-    {"kitchen", "basement"},
-    {"attic", "garage"},
-    {"library", "kitchen"},
-    {"garden", "basement"},
-};
-
-const std::vector<NamedThing> kWeapons = {
-    {"knife", "칼"},
-    {"blunt", "둔기"},
-    {"rope", "밧줄"},
-    {"poison", "독약"},
-    {"gun", "총"},
-    {"candlestick", "촛대"},
-};
-
-bool is_valid_weapon(const std::string& name)
-{
-    return std::any_of(kWeapons.begin(), kWeapons.end(),
-                        [&](const NamedThing& w) { return w.name == name; });
-}
-
-const NamedThing* find_room_by_id(const std::string& id)
-{
-    for (const auto& r : kRooms) {
-        if (r.id == id) return &r;
-    }
-    return nullptr;
-}
-
-nlohmann::json weapons_json()
-{
-    nlohmann::json arr = nlohmann::json::array();
-    for (const auto& w : kWeapons) arr.push_back({{"id", w.id}, {"name", w.name}});
-    return arr;
-}
-
-nlohmann::json rooms_json()
-{
-    nlohmann::json arr = nlohmann::json::array();
-    for (const auto& r : kRooms) arr.push_back({{"id", r.id}, {"name", r.name}});
-    return arr;
-}
-
-nlohmann::json edges_json()
-{
-    nlohmann::json arr = nlohmann::json::array();
-    for (const auto& [a, b] : kRoomEdges) arr.push_back({a, b});
-    return arr;
-}
-
 }
 
 GameRoom::GameRoom(boost::asio::io_context& ioc,
+                    const GameData& data,
                     MessageSender& sender,
                     std::unique_ptr<ICrimeEvaluator> evaluator,
                     std::unique_ptr<IGuessJudge> judge)
     : ioc_(ioc)
+    , data_(data)
     , sender_(sender)
     , evaluator_(std::move(evaluator))
     , judge_(std::move(judge))
@@ -228,10 +159,20 @@ void GameRoom::broadcast_board_info()
     // Static for the whole game: the map (rooms + adjacency) and the
     // weapon list never change per round, so this is sent once rather
     // than repeated in every round_start.
+    nlohmann::json rooms = nlohmann::json::array();
+    for (const auto& r : data_.map.rooms) {
+        rooms.push_back({{"id", r.id}, {"name", r.name}, {"x", r.x}, {"y", r.y}, {"w", r.w}, {"h", r.h}});
+    }
+    nlohmann::json edges = nlohmann::json::array();
+    for (const auto& [a, b] : data_.map.edges) edges.push_back({a, b});
+    nlohmann::json weapons = nlohmann::json::array();
+    for (const auto& w : data_.weapons) weapons.push_back({{"id", w.id}, {"name", w.name}});
+
     sender_.broadcast({{"type", "board_info"},
-               {"rooms", rooms_json()},
-               {"edges", edges_json()},
-               {"weapons", weapons_json()}});
+               {"map", {{"id", data_.map.id}, {"name", data_.map.name}, {"image", data_.map.image ? nlohmann::json(*data_.map.image) : nlohmann::json(nullptr)}}},
+               {"rooms", rooms},
+               {"edges", edges},
+               {"weapons", weapons}});
 }
 
 void GameRoom::start_round()
@@ -282,18 +223,20 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
     }
     const std::string text = msg.value("text", "");
     const std::string weapon = msg.value("weapon", "");
-    const std::string location_id = msg.value("location", "");
     if (text.empty()) {
         send_error(player_id, "범행 내용을 입력하세요.");
         return;
     }
-    if (!is_valid_weapon(weapon)) {
+    if (!data_.is_valid_weapon(weapon)) {
         send_error(player_id, "유효한 흉기를 선택하세요.");
         return;
     }
-    const NamedThing* room = find_room_by_id(location_id);
+    // Location isn't a separate field — the criminal only writes free
+    // text (plus picks a weapon), and the location is extracted from that
+    // text by matching it against the map's known room names.
+    const RoomDef* room = data_.extract_room_mention(text);
     if (!room) {
-        send_error(player_id, "유효한 장소를 선택하세요.");
+        send_error(player_id, "범행 내용에 지도에 있는 구체적인 장소를 포함해 주세요.");
         return;
     }
 

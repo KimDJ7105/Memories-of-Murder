@@ -5,7 +5,8 @@
 namespace mom {
 
 GameServer::GameServer(boost::asio::io_context& ioc)
-    : room_(ioc, *this, std::make_unique<MockCrimeEvaluator>(), std::make_unique<MockGuessJudge>())
+    : game_data_(GameData::load_default())
+    , room_(ioc, game_data_, *this, std::make_unique<MockCrimeEvaluator>(), std::make_unique<MockGuessJudge>())
 {
 }
 
