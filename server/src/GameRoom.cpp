@@ -1,6 +1,9 @@
 #include "GameRoom.hpp"
 
 #include <algorithm>
+#include <chrono>
+
+#include <boost/system/error_code.hpp>
 
 namespace mom {
 
@@ -11,19 +14,56 @@ constexpr int kMaxPlayers = 6;
 constexpr int kMaxAttempts = 3;
 constexpr double kAttemptMultipliers[kMaxAttempts] = {1.0, 0.9, 0.8};
 constexpr int kCorrectBonus = 10;
+constexpr int kTurnSeconds = 10;
 
-const std::vector<std::string> kLocations = {"주방", "서재", "차고", "정원", "지하실", "다락방"};
-const std::vector<std::string> kWeapons = {"칼", "둔기", "밧줄", "독약", "총", "촛대"};
+struct NamedThing {
+    std::string id;
+    std::string name;
+};
+
+const std::vector<NamedThing> kLocations = {
+    {"kitchen", "주방"},
+    {"library", "서재"},
+    {"garage", "차고"},
+    {"garden", "정원"},
+    {"basement", "지하실"},
+    {"attic", "다락방"},
+};
+
+const std::vector<NamedThing> kWeapons = {
+    {"knife", "칼"},
+    {"blunt", "둔기"},
+    {"rope", "밧줄"},
+    {"poison", "독약"},
+    {"gun", "총"},
+    {"candlestick", "촛대"},
+};
+
+bool is_valid_weapon(const std::string& name)
+{
+    return std::any_of(kWeapons.begin(), kWeapons.end(),
+                        [&](const NamedThing& w) { return w.name == name; });
+}
+
+nlohmann::json weapons_json()
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& w : kWeapons) arr.push_back({{"id", w.id}, {"name", w.name}});
+    return arr;
+}
 
 }
 
-GameRoom::GameRoom(MessageSender& sender,
+GameRoom::GameRoom(boost::asio::io_context& ioc,
+                    MessageSender& sender,
                     std::unique_ptr<ICrimeEvaluator> evaluator,
                     std::unique_ptr<IGuessJudge> judge)
-    : sender_(sender)
+    : ioc_(ioc)
+    , sender_(sender)
     , evaluator_(std::move(evaluator))
     , judge_(std::move(judge))
     , rng_(std::random_device{}())
+    , turn_timer_(ioc)
 {
 }
 
@@ -81,6 +121,8 @@ void GameRoom::handle_disconnect(int player_id)
 
     if (player_id == criminal_id_ && round_in_progress) {
         sender_.broadcast({{"type", "error"}, {"message", "범인의 연결이 끊겨 라운드를 종료합니다."}});
+        if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+        pending_order_.clear();
         crime_eval_ = CrimeEvaluation{};
         solved_at_attempt_.clear();
         finish_round();
@@ -88,19 +130,16 @@ void GameRoom::handle_disconnect(int player_id)
     }
 
     if (state_ == GameState::Investigation) {
-        pending_detectives_.erase(player_id);
-        current_guesses_.erase(player_id);
+        const bool was_current = (player_id == current_detective_);
+        pending_order_.erase(std::remove(pending_order_.begin(), pending_order_.end(), player_id),
+                              pending_order_.end());
 
-        if (pending_detectives_.empty()) {
-            finish_round();
+        if (was_current) {
+            if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+            begin_next_turn();
             return;
         }
-
-        bool all_in = true;
-        for (int id : pending_detectives_) {
-            if (!current_guesses_.count(id)) { all_in = false; break; }
-        }
-        if (all_in) run_guess_judging();
+        broadcast_room_update();
         return;
     }
 
@@ -117,6 +156,8 @@ void GameRoom::handle_message(int player_id, const nlohmann::json& msg)
         handle_submit_crime(player_id, msg);
     } else if (type == "submit_guess") {
         handle_submit_guess(player_id, msg);
+    } else if (type == "next_turn") {
+        handle_next_turn(player_id);
     } else {
         send_error(player_id, "알 수 없는 메시지 유형입니다: " + type);
     }
@@ -157,27 +198,33 @@ void GameRoom::start_round()
     round_number_++;
 
     std::uniform_int_distribution<size_t> loc_dist(0, kLocations.size() - 1);
-    std::uniform_int_distribution<size_t> weapon_dist(0, kWeapons.size() - 1);
-    location_ = kLocations[loc_dist(rng_)];
-    weapon_ = kWeapons[weapon_dist(rng_)];
+    const NamedThing& loc = kLocations[loc_dist(rng_)];
+    location_id_ = loc.id;
+    location_name_ = loc.name;
 
+    crime_weapon_.clear();
     crime_text_.clear();
     crime_eval_ = CrimeEvaluation{};
-    attempt_ = 0;
-    pending_detectives_.clear();
-    current_guesses_.clear();
+    pending_order_.clear();
+    attempts_used_.clear();
     solved_at_attempt_.clear();
+    current_detective_ = -1;
+    awaiting_advance_ = false;
 
     state_ = GameState::CrimeWriting;
 
     sender_.broadcast({{"type", "round_start"},
                {"round", round_number_},
-               {"location", location_},
-               {"weapon", weapon_}});
+               {"location", location_name_},
+               {"location_id", location_id_},
+               {"available_weapons", weapons_json()}});
 
     for (const auto& p : players_) {
-        sender_.send(p.id, {{"type", "your_role"},
-                             {"role", to_string(p.id == criminal_id_ ? Role::Criminal : Role::Detective)}});
+        if (p.id == criminal_id_) {
+            sender_.send(p.id, {{"type", "your_role"}, {"role", "criminal"}});
+        } else {
+            sender_.send(p.id, {{"type", "your_role"}, {"role", "detective"}});
+        }
     }
 
     broadcast_room_update();
@@ -194,12 +241,18 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         return;
     }
     const std::string text = msg.value("text", "");
+    const std::string weapon = msg.value("weapon", "");
     if (text.empty()) {
         send_error(player_id, "범행 내용을 입력하세요.");
         return;
     }
+    if (!is_valid_weapon(weapon)) {
+        send_error(player_id, "유효한 흉기를 선택하세요.");
+        return;
+    }
 
     crime_text_ = text;
+    crime_weapon_ = weapon;
     state_ = GameState::AIJudging;
     broadcast_room_update();
     run_ai_judging();
@@ -207,36 +260,43 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
 
 void GameRoom::run_ai_judging()
 {
-    Crime crime{location_, weapon_, crime_text_};
+    Crime crime{location_name_, crime_weapon_, crime_text_};
     evaluator_->evaluate(crime, [this](CrimeEvaluation eval) {
         crime_eval_ = std::move(eval);
-        start_investigation_attempt();
+        start_investigation();
     });
 }
 
-void GameRoom::start_investigation_attempt()
+void GameRoom::start_investigation()
 {
-    attempt_++;
+    pending_order_.clear();
+    attempts_used_.clear();
+    solved_at_attempt_.clear();
 
-    if (attempt_ == 1) {
-        pending_detectives_.clear();
-        for (const auto& p : players_) {
-            if (p.id != criminal_id_ && p.connected) pending_detectives_.insert(p.id);
-        }
+    std::vector<int> detective_ids;
+    for (const auto& p : players_) {
+        if (p.id != criminal_id_ && p.connected) detective_ids.push_back(p.id);
     }
+    std::shuffle(detective_ids.begin(), detective_ids.end(), rng_);
+    for (int id : detective_ids) pending_order_.push_back(id);
 
-    if (pending_detectives_.empty()) {
+    state_ = GameState::Investigation;
+    begin_next_turn();
+}
+
+void GameRoom::begin_next_turn()
+{
+    if (pending_order_.empty()) {
         finish_round();
         return;
     }
 
-    current_guesses_.clear();
-    state_ = GameState::Investigation;
+    current_detective_ = pending_order_.front();
+    const int attempt_number = attempts_used_[current_detective_] + 1;
 
-    nlohmann::json pending = nlohmann::json::array();
-    for (int id : pending_detectives_) pending.push_back(id);
-
-    sender_.broadcast({{"type", "investigation_start"}, {"attempt", attempt_}, {"pending_detectives", pending}});
+    sender_.broadcast({{"type", "investigation_turn_start"},
+               {"detective_id", current_detective_},
+               {"attempt", attempt_number}});
     broadcast_room_update();
 }
 
@@ -246,12 +306,12 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         send_error(player_id, "지금은 추리를 제출할 수 없습니다.");
         return;
     }
-    if (!pending_detectives_.count(player_id)) {
-        send_error(player_id, "추리를 제출할 수 없는 상태입니다.");
+    if (player_id != current_detective_) {
+        send_error(player_id, "지금은 당신의 차례가 아닙니다.");
         return;
     }
-    if (current_guesses_.count(player_id)) {
-        send_error(player_id, "이번 시도에는 이미 제출했습니다.");
+    if (awaiting_advance_) {
+        send_error(player_id, "이미 이번 차례에 제출했습니다.");
         return;
     }
     const std::string text = msg.value("text", "");
@@ -260,43 +320,54 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         return;
     }
 
-    current_guesses_[player_id] = text;
+    Crime crime{location_name_, crime_weapon_, crime_text_};
+    judge_->judge(crime, text, [this, player_id, text](GuessFeedback fb) {
+        attempts_used_[player_id] = attempts_used_[player_id] + 1;
+        pending_order_.pop_front();
 
-    for (int id : pending_detectives_) {
-        if (!current_guesses_.count(id)) return;
-    }
-    run_guess_judging();
+        if (fb.correct) {
+            solved_at_attempt_[player_id] = attempts_used_[player_id];
+        } else if (attempts_used_[player_id] < kMaxAttempts) {
+            pending_order_.push_back(player_id);
+        }
+
+        nlohmann::json aspects_json = nlohmann::json::array();
+        for (const auto& a : fb.aspects) {
+            aspects_json.push_back({{"aspect", a.aspect}, {"verdict", a.verdict}});
+        }
+
+        sender_.broadcast({{"type", "guess_feedback"},
+                   {"player_id", player_id},
+                   {"guess_text", text},
+                   {"correct", fb.correct},
+                   {"attempt", attempts_used_[player_id]},
+                   {"aspects", aspects_json}});
+
+        awaiting_advance_ = true;
+        schedule_turn_advance();
+    });
 }
 
-void GameRoom::run_guess_judging()
+void GameRoom::schedule_turn_advance()
 {
-    Crime crime{location_, weapon_, crime_text_};
-    judge_->judge(crime, current_guesses_, [this](std::map<int, bool> results) {
-        for (const auto& [id, correct] : results) {
-            if (correct) {
-                solved_at_attempt_[id] = attempt_;
-                pending_detectives_.erase(id);
-            }
-        }
-
-        nlohmann::json results_json = nlohmann::json::object();
-        for (const auto& [id, correct] : results) results_json[std::to_string(id)] = correct;
-        nlohmann::json still_pending = nlohmann::json::array();
-        for (int id : pending_detectives_) still_pending.push_back(id);
-
-        sender_.broadcast({{"type", "guess_result"},
-                   {"attempt", attempt_},
-                   {"results", results_json},
-                   {"still_pending", still_pending}});
-
-        current_guesses_.clear();
-
-        if (pending_detectives_.empty() || attempt_ >= kMaxAttempts) {
-            finish_round();
-        } else {
-            start_investigation_attempt();
-        }
+    turn_timer_.expires_after(std::chrono::seconds(kTurnSeconds));
+    turn_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (ec) return;
+        if (!awaiting_advance_) return;
+        awaiting_advance_ = false;
+        begin_next_turn();
     });
+}
+
+void GameRoom::handle_next_turn(int player_id)
+{
+    if (state_ != GameState::Investigation || !awaiting_advance_ || player_id != current_detective_) {
+        send_error(player_id, "지금은 다음 차례로 넘길 수 없습니다.");
+        return;
+    }
+    turn_timer_.cancel();
+    awaiting_advance_ = false;
+    begin_next_turn();
 }
 
 void GameRoom::finish_round()
@@ -326,6 +397,7 @@ void GameRoom::finish_round()
                {"round", round_number_},
                {"criminal_id", criminal_id_},
                {"crime_text", crime_text_},
+               {"weapon", crime_weapon_},
                {"crime_score", crime_eval_.score},
                {"evaluation", crime_eval_.evaluation},
                {"key_facts", crime_eval_.key_facts},

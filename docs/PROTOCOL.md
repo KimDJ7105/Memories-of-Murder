@@ -8,8 +8,9 @@
 |---|---|---|
 | `join` | `name` | 최초 접속 시 반드시 먼저 보내야 함. Lobby 상태에서만 허용, 성공 시 `joined` 응답 |
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
-| `submit_crime` | `text` | 범인만, `CrimeWriting` 상태에서만 허용 |
-| `submit_guess` | `text` | 아직 못 맞춘 탐정만, `Investigation` 상태에서만 허용 |
+| `submit_crime` | `text`, `weapon` | 범인만, `CrimeWriting` 상태에서만 허용. `weapon`은 `round_start`의 `available_weapons` 중 하나여야 함 |
+| `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용 |
+| `next_turn` | - | 방금 추리를 제출한 탐정 본인만, 10초 자동 전환을 기다리지 않고 바로 다음 차례로 넘길 때 |
 
 ## Server → Client
 
@@ -17,22 +18,35 @@
 |---|---|---|
 | `joined` | `player_id` | join 성공 응답 |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
-| `round_start` | `round`, `location`, `weapon` | 새 라운드 시작, 장소/무기는 전원 공개 |
+| `round_start` | `round`, `location`, `location_id`, `available_weapons[{id,name}]` | 새 라운드 시작. 장소는 지도에 표시되도록 전원 공개, 무기 후보 목록도 전원 공개(단, 범인이 실제로 고른 무기는 비공개) |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
-| `investigation_start` | `attempt`, `pending_detectives[]` | 이번 시도에 추리를 제출해야 하는 탐정 id 목록 |
-| `guess_result` | `attempt`, `results{id:bool}`, `still_pending[]` | 해당 시도의 판정 결과 (한 시도 = 전원 제출 후 배치 판정 1회) |
-| `round_result` | `criminal_id`, `crime_text`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 |
+| `investigation_turn_start` | `detective_id`, `attempt` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회) |
+| `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "무기"/"살해 방법"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. 전원에게 공개 |
+| `round_result` | `criminal_id`, `crime_text`, `weapon`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 무기가 공식적으로 공개됨) |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
 
 ## 상태 흐름
 
 ```
-Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation(최대 3회 시도) → Result → NextRound → (다음 라운드 | GameOver)
+Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Result → NextRound → (다음 라운드 | GameOver)
 ```
 
 `RoleAssignment`/`AIJudging`/`Result`/`NextRound`는 서버가 즉시 통과시키는 내부 상태로, 별도 클라이언트 입력을 기다리지 않는다. 클라이언트가 실제로 입력을 보내야 하는 상태는 `CrimeWriting`과 `Investigation`뿐이다.
 
+## Investigation은 턴제
+
+탐정들은 동시에 제출하지 않고 한 명씩 순서대로 추리한다 (매 라운드 시작 시 순서를 셔플).
+
+1. 서버가 `investigation_turn_start`로 현재 차례의 탐정을 알림
+2. 그 탐정이 `submit_guess` 전송
+3. 서버가 즉시 판정 후 `guess_feedback`을 전원에게 브로드캐스트 (정답/오답 + 항목별 근접도)
+4. 방금 답한 탐정이 `next_turn`을 보내거나, 10초가 지나면 서버가 자동으로 다음 차례로 진행
+5. 정답을 맞혔거나 3회 시도를 다 쓴 탐정은 순번에서 빠지고, 아직 남은 탐정이 있으면 계속 진행. 아무도 안 남으면 라운드 종료
+
+원래 설계(섹션 11)의 "한 라운드 = 판정 1회" 배치 최적화 대신, 턴마다 즉시 피드백을 주기 위해 추리 1건당 판정 1회로 바꾼 것 — 응답성을 우선한 의도적 트레이드오프.
+
 ## Phase 1의 임시 구현
 
 - `CrimeEvaluator`, `GuessJudge`는 각각 `MockCrimeEvaluator`/`MockGuessJudge`로, AI 호출 없이 텍스트 길이·키워드 매칭만으로 동작하는 임시 구현이다. Phase 2에서 Ollama 기반 구현으로 교체될 인터페이스(`ICrimeEvaluator`, `IGuessJudge`, 둘 다 `server/include/`)만 유지하면 된다.
+- `aspects`의 "살해 방법"/"은닉 방법" 구분도 지금은 범행 텍스트를 절반으로 대충 나눈 휴리스틱이다. 실제 구조화 추출은 Phase 2에서 AI가 `key_facts` 기반으로 담당한다.

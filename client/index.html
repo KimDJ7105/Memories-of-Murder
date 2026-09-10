@@ -5,30 +5,119 @@
 <title>살인의 추억</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #222; }
-  h1 { font-size: 1.4em; }
-  section { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  #connection { font-size: 0.85em; color: #888; margin-bottom: 12px; }
-  #connection.ok { color: #2a7; }
-  #connection.bad { color: #c33; }
-  input[type=text], textarea { width: 100%; padding: 8px; font-size: 1em; border: 1px solid #ccc; border-radius: 4px; }
-  textarea { min-height: 100px; resize: vertical; }
-  button { padding: 8px 16px; font-size: 1em; border: 0; border-radius: 4px; background: #333; color: #fff; cursor: pointer; margin-top: 8px; }
-  button:disabled { background: #aaa; cursor: not-allowed; }
-  ul#players { list-style: none; padding: 0; }
-  ul#players li { padding: 4px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
-  .badge { font-size: 0.75em; padding: 2px 6px; border-radius: 4px; background: #eee; margin-left: 6px; }
-  .badge.host { background: #ffe08a; }
-  .badge.criminal { background: #f6a; color: #fff; }
-  .role-banner { font-weight: bold; padding: 8px; border-radius: 4px; margin-bottom: 12px; }
-  .role-banner.criminal { background: #fdd; }
-  .role-banner.detective { background: #ddf; }
-  #log { background: #fafafa; border: 1px solid #eee; padding: 8px; font-size: 0.8em; max-height: 160px; overflow-y: auto; white-space: pre-wrap; }
-  .error { color: #c33; font-weight: bold; }
+
+  :root {
+    --paper: #ece2c6;
+    --paper-dark: #ddcfa6;
+    --ink: #2b2116;
+    --ink-faded: #5a4d38;
+    --rule: #8a7a55;
+    --accent: #7a1f1f;
+  }
+
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    max-width: 760px;
+    margin: 24px auto;
+    padding: 0 16px 60px;
+    color: var(--ink);
+    background:
+      radial-gradient(ellipse at 15% 20%, rgba(120,90,40,0.10), transparent 40%),
+      radial-gradient(ellipse at 85% 70%, rgba(120,90,40,0.12), transparent 45%),
+      radial-gradient(ellipse at 60% 10%, rgba(80,60,20,0.08), transparent 35%),
+      var(--paper);
+  }
+
+  h1.masthead {
+    text-align: center;
+    font-size: 2.4em;
+    letter-spacing: 6px;
+    margin: 8px 0 4px;
+    text-transform: uppercase;
+    border-top: 4px double var(--ink);
+    border-bottom: 4px double var(--ink);
+    padding: 10px 0;
+  }
+  .subhead { text-align: center; font-style: italic; color: var(--ink-faded); margin: 0 0 20px; font-size: 0.9em; }
+
+  section {
+    border: 1px solid var(--rule);
+    background: rgba(255, 252, 240, 0.35);
+    padding: 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.04) inset;
+  }
+  h2 {
+    margin-top: 0;
+    font-size: 1.1em;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 6px;
+  }
+
+  #connection { font-size: 0.8em; color: var(--ink-faded); margin-bottom: 12px; text-align: right; }
+  #connection.ok::before { content: "● "; color: #3a6b35; }
+  #connection.bad::before { content: "● "; color: var(--accent); }
+
+  input[type=text], textarea {
+    width: 100%; padding: 8px; font-size: 1em; font-family: inherit;
+    border: 1px solid var(--rule); background: #fbf6e6; color: var(--ink); border-radius: 2px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+
+  button {
+    padding: 8px 18px; font-size: 0.95em; font-family: inherit; border: 1px solid var(--ink);
+    border-radius: 2px; background: var(--ink); color: var(--paper); cursor: pointer; margin-top: 8px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  button:hover { background: #46392a; }
+  button:disabled { background: #a99; border-color: #a99; cursor: not-allowed; }
+
+  ul#players, ul#players-round { list-style: none; padding: 0; margin: 0; }
+  ul#players li, ul#players-round li {
+    padding: 5px 2px; border-bottom: 1px dotted var(--rule);
+    display: flex; justify-content: space-between; font-size: 0.95em;
+  }
+  .badge { font-size: 0.7em; padding: 2px 6px; border: 1px solid var(--ink); margin-left: 6px; }
+  .badge.host { background: #d8b34a; }
+  .badge.turn { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .role-banner { font-weight: bold; padding: 8px 12px; margin-bottom: 12px; border: 2px solid var(--ink); text-align: center; }
+  .role-banner.criminal { background: #e5c9c9; }
+  .role-banner.detective { background: #c9d3e5; }
+
+  #map-wrap { text-align: center; margin-bottom: 14px; }
+  #map-wrap svg { max-width: 100%; height: auto; }
+  .room-rect { fill: #ddceac; stroke: var(--ink); stroke-width: 2; }
+  .room-rect.active { fill: var(--accent); opacity: 0.85; }
+  .room-label { font-family: Georgia, serif; font-size: 11px; fill: var(--ink); text-anchor: middle; }
+  .room-rect.active + .room-label { fill: #fff; font-weight: bold; }
+
+  #weapon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .weapon-btn {
+    margin-top: 0; background: #fbf6e6; color: var(--ink); border: 1px solid var(--rule);
+    text-transform: none; letter-spacing: 0;
+  }
+  .weapon-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  #investigation-log { margin-top: 10px; }
+  .log-entry { border-left: 3px solid var(--rule); padding: 6px 10px; margin-bottom: 8px; background: rgba(255,252,240,0.5); }
+  .log-entry.correct { border-left-color: #3a6b35; }
+  .log-entry .who { font-weight: bold; }
+  .aspects { font-size: 0.85em; color: var(--ink-faded); margin-top: 4px; }
+  .aspects span { margin-right: 10px; }
+
+  #turn-banner { font-style: italic; margin-bottom: 8px; }
+  #advance-box { margin-top: 8px; font-size: 0.9em; }
+
+  .error { color: var(--accent); font-weight: bold; }
+  #log { background: rgba(0,0,0,0.03); border: 1px solid var(--rule); padding: 8px; font-size: 0.75em; max-height: 140px; overflow-y: auto; white-space: pre-wrap; font-family: "Consolas", monospace; }
 </style>
 </head>
 <body>
-<h1>살인의 추억</h1>
+<h1 class="masthead">살인의 추억</h1>
+<p class="subhead">— 사건 현장 속보 —</p>
 <div id="connection" class="bad">연결 중...</div>
 
 <section id="join-screen">
@@ -46,24 +135,49 @@
 
 <section id="round-screen" hidden>
   <h2 id="round-title"></h2>
+
+  <div id="map-wrap">
+    <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="298" height="198" fill="none" stroke="#8a7a55" stroke-width="1"/>
+      <rect id="room-attic" class="room-rect" x="2" y="2" width="98" height="98"/>
+      <text class="room-label" x="51" y="55">다락방</text>
+      <rect id="room-library" class="room-rect" x="101" y="2" width="98" height="98"/>
+      <text class="room-label" x="150" y="55">서재</text>
+      <rect id="room-garden" class="room-rect" x="200" y="2" width="98" height="98"/>
+      <text class="room-label" x="249" y="55">정원</text>
+      <rect id="room-garage" class="room-rect" x="2" y="101" width="98" height="97"/>
+      <text class="room-label" x="51" y="154">차고</text>
+      <rect id="room-kitchen" class="room-rect" x="101" y="101" width="98" height="97"/>
+      <text class="room-label" x="150" y="154">주방</text>
+      <rect id="room-basement" class="room-rect" x="200" y="101" width="98" height="97"/>
+      <text class="room-label" x="249" y="154">지하실</text>
+    </svg>
+  </div>
+
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
-    <p>범행을 자유롭게 서술하세요.</p>
+    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요.</p>
+    <div id="weapon-picker"></div>
     <textarea id="crime-text"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
   </div>
 
   <div id="investigation-box" hidden>
-    <p id="attempt-info"></p>
+    <p id="turn-banner"></p>
     <textarea id="guess-text"></textarea>
     <button id="submit-guess-btn">추리 제출</button>
-    <p id="guess-status"></p>
+    <div id="advance-box" hidden>
+      <span id="advance-countdown"></span>
+      <button id="next-turn-btn">다음 차례로</button>
+    </div>
   </div>
 
   <div id="waiting-box" hidden>
     <p id="waiting-message">다른 플레이어를 기다리는 중...</p>
   </div>
+
+  <div id="investigation-log"></div>
 
   <ul id="players-round"></ul>
 </section>
@@ -85,12 +199,17 @@
 const $ = (id) => document.getElementById(id);
 const log = (line) => { $('log').textContent += line + "\n"; $('log').scrollTop = $('log').scrollHeight; };
 
+const WEAPON_ICONS = { knife: '🔪', blunt: '🔨', rope: '🪢', poison: '🧪', gun: '🔫', candlestick: '🕯️' };
+
 let ws = null;
 let myId = null;
 let myRole = null;
 let players = [];
 let roomState = 'Lobby';
-let pendingDetectives = [];
+let availableWeapons = [];
+let selectedWeapon = null;
+let currentDetectiveId = null;
+let advanceCountdownTimer = null;
 
 function connect() {
   ws = new WebSocket('ws://localhost:9002');
@@ -118,8 +237,13 @@ function handleMessage(msg) {
       break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
-      $('round-title').textContent = `라운드 ${msg.round} — 장소: ${msg.location} / 무기: ${msg.weapon}`;
-      hide('crime-writing-box'); hide('investigation-box'); hide('waiting-box');
+      $('round-title').textContent = `라운드 ${msg.round}`;
+      highlightRoom(msg.location_id);
+      availableWeapons = msg.available_weapons;
+      selectedWeapon = null;
+      $('investigation-log').innerHTML = '';
+      hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
+      stopAdvanceCountdown();
       break;
     case 'your_role':
       myRole = msg.role;
@@ -127,35 +251,42 @@ function handleMessage(msg) {
       banner.textContent = myRole === 'criminal' ? '당신은 범인입니다' : '당신은 탐정입니다';
       banner.className = 'role-banner ' + myRole;
       if (myRole === 'criminal') {
+        renderWeaponPicker();
+        $('crime-text').value = '';
         show('crime-writing-box'); hide('waiting-box');
       } else {
         hide('crime-writing-box'); show('waiting-box');
         $('waiting-message').textContent = '범인이 범행을 작성하는 중...';
       }
       break;
-    case 'investigation_start':
-      pendingDetectives = msg.pending_detectives;
-      if (pendingDetectives.includes(myId)) {
-        show('investigation-box'); hide('waiting-box');
-        $('attempt-info').textContent = `추리 시도 ${msg.attempt} / 3`;
+    case 'investigation_turn_start':
+      currentDetectiveId = msg.detective_id;
+      hide('advance-box'); stopAdvanceCountdown();
+      renderPlayers();
+      if (currentDetectiveId === myId) {
+        show('investigation-box'); hide('waiting-box'); hide('crime-writing-box');
+        $('turn-banner').textContent = `당신의 차례입니다 (${msg.attempt}번째 시도 / 최대 3회)`;
         $('guess-text').value = '';
-        $('guess-status').textContent = '';
-      } else if (myRole === 'detective') {
-        hide('investigation-box'); show('waiting-box');
-        $('waiting-message').textContent = '당신은 이미 정답을 맞혔습니다. 다른 탐정을 기다리는 중...';
+        $('guess-text').disabled = false;
+        $('submit-guess-btn').disabled = false;
       } else {
-        hide('crime-writing-box'); hide('investigation-box'); show('waiting-box');
-        $('waiting-message').textContent = `탐정들이 추리 중... (시도 ${msg.attempt})`;
+        hide('investigation-box'); hide('crime-writing-box'); show('waiting-box');
+        const name = players.find(p => p.id === currentDetectiveId)?.name ?? currentDetectiveId;
+        $('waiting-message').textContent = `${name} 탐정의 차례입니다 (${msg.attempt}번째 시도)`;
       }
       break;
-    case 'guess_result':
-      if (myRole === 'detective' && pendingDetectives.includes(myId)) {
-        const correct = msg.results[String(myId)];
-        $('guess-status').textContent = correct ? '정답입니다!' : '오답입니다. 다음 시도를 기다리세요.';
+    case 'guess_feedback':
+      appendLogEntry(msg);
+      if (msg.player_id === myId) {
+        $('guess-text').disabled = true;
+        $('submit-guess-btn').disabled = true;
+        show('advance-box');
+        startAdvanceCountdown();
       }
       break;
     case 'round_result':
       show('result-screen'); hide('round-screen');
+      stopAdvanceCountdown();
       renderRoundResult(msg);
       break;
     case 'game_over':
@@ -169,11 +300,31 @@ function handleMessage(msg) {
   }
 }
 
+function highlightRoom(locationId) {
+  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active'));
+  const el = document.getElementById('room-' + locationId);
+  if (el) el.classList.add('active');
+}
+
+function renderWeaponPicker() {
+  $('weapon-picker').innerHTML = availableWeapons.map(w =>
+    `<button type="button" class="weapon-btn" data-name="${w.name}">${WEAPON_ICONS[w.id] || ''} ${w.name}</button>`
+  ).join('');
+  document.querySelectorAll('.weapon-btn').forEach(btn => {
+    btn.onclick = () => {
+      selectedWeapon = btn.dataset.name;
+      document.querySelectorAll('.weapon-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+    };
+  });
+}
+
 function renderPlayers() {
   const isHost = players.find(p => p.id === myId)?.is_host;
   const list = players.map(p => {
     const badges = [];
     if (p.is_host) badges.push('<span class="badge host">방장</span>');
+    if (p.id === currentDetectiveId && roomState === 'Investigation') badges.push('<span class="badge turn">차례</span>');
     if (p.has_been_criminal) badges.push('<span class="badge">범인 완료</span>');
     if (!p.connected) badges.push('<span class="badge">연결 끊김</span>');
     return `<li><span>${p.name}</span><span>${p.score}점 ${badges.join('')}</span></li>`;
@@ -186,6 +337,32 @@ function renderPlayers() {
                                  players.length > 6 ? '최대 6명까지 가능합니다.' : '시작할 준비가 되었습니다.';
 }
 
+function appendLogEntry(msg) {
+  const name = players.find(p => p.id === msg.player_id)?.name ?? msg.player_id;
+  const aspects = msg.aspects.map(a => `<span>${a.aspect}: ${a.verdict}</span>`).join('');
+  const div = document.createElement('div');
+  div.className = 'log-entry' + (msg.correct ? ' correct' : '');
+  div.innerHTML = `
+    <div><span class="who">${name}</span> (${msg.attempt}번째 시도) — ${msg.correct ? '정답' : '오답'}</div>
+    <div>"${msg.guess_text}"</div>
+    <div class="aspects">${aspects}</div>
+  `;
+  $('investigation-log').prepend(div);
+}
+
+function startAdvanceCountdown() {
+  let remaining = 10;
+  $('advance-countdown').textContent = `${remaining}초 후 자동으로 다음 차례`;
+  advanceCountdownTimer = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) { stopAdvanceCountdown(); return; }
+    $('advance-countdown').textContent = `${remaining}초 후 자동으로 다음 차례`;
+  }, 1000);
+}
+function stopAdvanceCountdown() {
+  if (advanceCountdownTimer) { clearInterval(advanceCountdownTimer); advanceCountdownTimer = null; }
+}
+
 function renderRoundResult(msg) {
   const gained = Object.entries(msg.scores_gained).map(([id, amt]) => {
     const p = players.find(pl => String(pl.id) === id);
@@ -193,7 +370,8 @@ function renderRoundResult(msg) {
   }).join('');
   $('result-body').innerHTML = `
     <p><b>범인:</b> ${players.find(p => p.id === msg.criminal_id)?.name ?? msg.criminal_id}</p>
-    <p><b>범행:</b> ${msg.crime_text}</p>
+    <p><b>흉기:</b> ${msg.weapon}</p>
+    <p><b>범행 전문:</b> ${msg.crime_text}</p>
     <p><b>범행 점수:</b> ${msg.crime_score} — ${msg.evaluation}</p>
     <ul>${gained}</ul>
   `;
@@ -222,7 +400,8 @@ $('start-btn').onclick = () => send({ type: 'start_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;
-  send({ type: 'submit_crime', text });
+  if (!selectedWeapon) { alert('흉기를 선택하세요.'); return; }
+  send({ type: 'submit_crime', text, weapon: selectedWeapon });
   hide('crime-writing-box'); show('waiting-box');
   $('waiting-message').textContent = 'AI가 범행을 평가하는 중...';
 };
@@ -230,7 +409,10 @@ $('submit-guess-btn').onclick = () => {
   const text = $('guess-text').value.trim();
   if (!text) return;
   send({ type: 'submit_guess', text });
-  $('guess-status').textContent = '제출됨. 결과를 기다리는 중...';
+};
+$('next-turn-btn').onclick = () => {
+  stopAdvanceCountdown();
+  send({ type: 'next_turn' });
 };
 
 connect();

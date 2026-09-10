@@ -9,7 +9,7 @@ int main()
 
     try {
         boost::asio::io_context ioc{1};
-        mom::GameServer server;
+        mom::GameServer server(ioc);
 
         auto listener = std::make_shared<mom::Listener>(
             ioc, mom::tcp::endpoint(mom::tcp::v4(), port), server);

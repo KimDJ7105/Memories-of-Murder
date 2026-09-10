@@ -1,35 +1,51 @@
 #pragma once
 
 #include <functional>
-#include <map>
 #include <string>
+#include <vector>
+
 #include "Crime.hpp"
 
 namespace mom {
 
-// Judges a batch of detective guesses against one crime in a single call,
-// matching docs/DESIGN.md section 11 (one AI call per attempt round, not
-// one per detective). Keyed by player id -> guess text in, player id ->
-// correct(bool) out.
+// One dimension of feedback on a single guess, e.g. {"무기", "일치"}.
+// `verdict` is one of "일치" (match), "유사" (partial), "불일치" (no match) —
+// a plain string rather than an enum so a future AI-backed judge can phrase
+// it more richly without changing the wire shape.
+struct AspectFeedback {
+    std::string aspect;
+    std::string verdict;
+};
+
+struct GuessFeedback {
+    bool correct = false;
+    std::vector<AspectFeedback> aspects;
+};
+
+// Judges one detective's guess against the crime. Detectives now go one at
+// a time (see docs/DESIGN.md revision: turn-based investigation instead of
+// batched simultaneous guesses), so this trades the original "one AI call
+// per attempt round" batching for "one call per guess" — a deliberate
+// tradeoff for immediate per-turn feedback.
 class IGuessJudge {
 public:
     virtual ~IGuessJudge() = default;
     virtual void judge(
         const Crime& crime,
-        const std::map<int, std::string>& guesses,
-        std::function<void(std::map<int, bool>)> on_done) = 0;
+        const std::string& guess_text,
+        std::function<void(GuessFeedback)> on_done) = 0;
 };
 
-// Placeholder heuristic: tokenizes the crime text and a guess, and counts a
-// guess correct once it covers enough of the crime's own tokens. Crude on
-// purpose — it exists to let the round flow be tested end to end before an
-// AI-backed judge (Phase 2) replaces it.
+// Placeholder heuristic, not real language understanding: splits the crime
+// text roughly in half to stand in for "method" vs "concealment" aspects,
+// and checks the weapon name directly. Exists to exercise the turn engine
+// end to end before an AI-backed judge (Phase 2) replaces it.
 class MockGuessJudge : public IGuessJudge {
 public:
     void judge(
         const Crime& crime,
-        const std::map<int, std::string>& guesses,
-        std::function<void(std::map<int, bool>)> on_done) override;
+        const std::string& guess_text,
+        std::function<void(GuessFeedback)> on_done) override;
 };
 
 }

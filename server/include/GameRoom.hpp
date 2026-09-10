@@ -1,12 +1,14 @@
 #pragma once
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <random>
-#include <set>
 #include <string>
 #include <vector>
 
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <nlohmann/json.hpp>
 
 #include "Crime.hpp"
@@ -23,9 +25,16 @@ namespace mom {
 // applied, everything else comes back as an "error" reply. Phase 1 runs a
 // single GameRoom directly inside GameServer; a RoomManager can wrap many
 // of these later (Phase 3) without GameRoom itself changing.
+//
+// Investigation is turn-based: detectives take one guess at a time in a
+// rotating queue (`pending_order_`), each guess gets immediate public
+// feedback, and the turn advances either when the answering detective
+// sends `next_turn` or after a 10s server-side timer fires — whichever
+// comes first.
 class GameRoom {
 public:
-    GameRoom(MessageSender& sender,
+    GameRoom(boost::asio::io_context& ioc,
+              MessageSender& sender,
               std::unique_ptr<ICrimeEvaluator> evaluator,
               std::unique_ptr<IGuessJudge> judge);
 
@@ -43,21 +52,26 @@ private:
     void handle_start_game(int player_id);
     void handle_submit_crime(int player_id, const nlohmann::json& msg);
     void handle_submit_guess(int player_id, const nlohmann::json& msg);
+    void handle_next_turn(int player_id);
 
     void start_round();
     void run_ai_judging();
-    void start_investigation_attempt();
-    void run_guess_judging();
+    void start_investigation();
+    void begin_next_turn();
+    void schedule_turn_advance();
+
     void finish_round();
 
     void broadcast_room_update();
     void send_error(int player_id, const std::string& message);
     Player* find_player(int player_id);
 
+    boost::asio::io_context& ioc_;
     MessageSender& sender_;
     std::unique_ptr<ICrimeEvaluator> evaluator_;
     std::unique_ptr<IGuessJudge> judge_;
     std::mt19937 rng_;
+    boost::asio::steady_timer turn_timer_;
 
     GameState state_ = GameState::Lobby;
     std::vector<Player> players_;
@@ -67,15 +81,17 @@ private:
     std::vector<int> criminal_queue_;
     int round_number_ = 0;
     int criminal_id_ = -1;
-    std::string location_;
-    std::string weapon_;
+    std::string location_id_;
+    std::string location_name_;
+    std::string crime_weapon_;
     std::string crime_text_;
     CrimeEvaluation crime_eval_;
 
-    int attempt_ = 0;
-    std::set<int> pending_detectives_;
-    std::map<int, std::string> current_guesses_;
+    std::deque<int> pending_order_;
+    std::map<int, int> attempts_used_;
     std::map<int, int> solved_at_attempt_;
+    int current_detective_ = -1;
+    bool awaiting_advance_ = false;
 };
 
 }

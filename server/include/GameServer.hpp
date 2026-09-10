@@ -3,6 +3,8 @@
 #include <map>
 #include <memory>
 
+#include <boost/asio/io_context.hpp>
+
 #include "GameRoom.hpp"
 #include "MessageSender.hpp"
 #include "Session.hpp"
@@ -14,7 +16,7 @@ namespace mom {
 // without changing how Session or GameRoom work (docs/DESIGN.md Phase 3).
 class GameServer : public MessageSender {
 public:
-    GameServer();
+    explicit GameServer(boost::asio::io_context& ioc);
 
     void on_message(const std::shared_ptr<Session>& session, const std::string& text);
     void on_disconnect(const std::shared_ptr<Session>& session);
