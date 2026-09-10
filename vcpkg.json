@@ -5,5 +5,6 @@
     "boost-beast",
     "boost-asio",
     "nlohmann-json"
-  ]
+  ],
+  "builtin-baseline": "3d33b7f7a8121da6e4fa80b35618fc8e960be686"
 }

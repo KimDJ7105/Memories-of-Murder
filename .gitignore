@@ -26,3 +26,7 @@ vcpkg_installed/
 
 # AI test mode logs
 logs/
+build_log.txt
+
+# Claude Code local harness state
+.claude/

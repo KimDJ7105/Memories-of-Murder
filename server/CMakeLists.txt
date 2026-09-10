@@ -12,4 +12,5 @@ target_link_libraries(game_server PRIVATE
 
 if(WIN32)
     target_compile_definitions(game_server PRIVATE _WIN32_WINNT=0x0A00)
+    target_compile_options(game_server PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 endif()
