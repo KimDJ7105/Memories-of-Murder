@@ -3,7 +3,15 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(game_server
     src/main.cpp
+    src/GameRoom.cpp
+    src/GameServer.cpp
+    src/Session.cpp
+    src/Listener.cpp
+    src/MockCrimeEvaluator.cpp
+    src/MockGuessJudge.cpp
 )
+
+target_include_directories(game_server PRIVATE include)
 
 target_link_libraries(game_server PRIVATE
     Boost::system
