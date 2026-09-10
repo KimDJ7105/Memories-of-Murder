@@ -21,13 +21,26 @@ struct NamedThing {
     std::string name;
 };
 
-const std::vector<NamedThing> kLocations = {
+// Static board data. The server never picks a room for a round — the
+// criminal chooses one when submitting the crime, so adjacency exists
+// only to be handed to clients (and, later, an AI evaluator) as data.
+const std::vector<NamedThing> kRooms = {
     {"kitchen", "주방"},
     {"library", "서재"},
     {"garage", "차고"},
     {"garden", "정원"},
     {"basement", "지하실"},
     {"attic", "다락방"},
+};
+
+const std::vector<std::pair<std::string, std::string>> kRoomEdges = {
+    {"attic", "library"},
+    {"library", "garden"},
+    {"garage", "kitchen"},
+    {"kitchen", "basement"},
+    {"attic", "garage"},
+    {"library", "kitchen"},
+    {"garden", "basement"},
 };
 
 const std::vector<NamedThing> kWeapons = {
@@ -45,10 +58,32 @@ bool is_valid_weapon(const std::string& name)
                         [&](const NamedThing& w) { return w.name == name; });
 }
 
+const NamedThing* find_room_by_id(const std::string& id)
+{
+    for (const auto& r : kRooms) {
+        if (r.id == id) return &r;
+    }
+    return nullptr;
+}
+
 nlohmann::json weapons_json()
 {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& w : kWeapons) arr.push_back({{"id", w.id}, {"name", w.name}});
+    return arr;
+}
+
+nlohmann::json rooms_json()
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& r : kRooms) arr.push_back({{"id", r.id}, {"name", r.name}});
+    return arr;
+}
+
+nlohmann::json edges_json()
+{
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& [a, b] : kRoomEdges) arr.push_back({a, b});
     return arr;
 }
 
@@ -184,7 +219,19 @@ void GameRoom::handle_start_game(int player_id)
     std::shuffle(criminal_queue_.begin(), criminal_queue_.end(), rng_);
 
     round_number_ = 0;
+    broadcast_board_info();
     start_round();
+}
+
+void GameRoom::broadcast_board_info()
+{
+    // Static for the whole game: the map (rooms + adjacency) and the
+    // weapon list never change per round, so this is sent once rather
+    // than repeated in every round_start.
+    sender_.broadcast({{"type", "board_info"},
+               {"rooms", rooms_json()},
+               {"edges", edges_json()},
+               {"weapons", weapons_json()}});
 }
 
 void GameRoom::start_round()
@@ -197,11 +244,8 @@ void GameRoom::start_round()
 
     round_number_++;
 
-    std::uniform_int_distribution<size_t> loc_dist(0, kLocations.size() - 1);
-    const NamedThing& loc = kLocations[loc_dist(rng_)];
-    location_id_ = loc.id;
-    location_name_ = loc.name;
-
+    crime_location_id_.clear();
+    crime_location_name_.clear();
     crime_weapon_.clear();
     crime_text_.clear();
     crime_eval_ = CrimeEvaluation{};
@@ -213,11 +257,7 @@ void GameRoom::start_round()
 
     state_ = GameState::CrimeWriting;
 
-    sender_.broadcast({{"type", "round_start"},
-               {"round", round_number_},
-               {"location", location_name_},
-               {"location_id", location_id_},
-               {"available_weapons", weapons_json()}});
+    sender_.broadcast({{"type", "round_start"}, {"round", round_number_}});
 
     for (const auto& p : players_) {
         if (p.id == criminal_id_) {
@@ -242,6 +282,7 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
     }
     const std::string text = msg.value("text", "");
     const std::string weapon = msg.value("weapon", "");
+    const std::string location_id = msg.value("location", "");
     if (text.empty()) {
         send_error(player_id, "범행 내용을 입력하세요.");
         return;
@@ -250,9 +291,16 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         send_error(player_id, "유효한 흉기를 선택하세요.");
         return;
     }
+    const NamedThing* room = find_room_by_id(location_id);
+    if (!room) {
+        send_error(player_id, "유효한 장소를 선택하세요.");
+        return;
+    }
 
     crime_text_ = text;
     crime_weapon_ = weapon;
+    crime_location_id_ = room->id;
+    crime_location_name_ = room->name;
     state_ = GameState::AIJudging;
     broadcast_room_update();
     run_ai_judging();
@@ -260,7 +308,7 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
 
 void GameRoom::run_ai_judging()
 {
-    Crime crime{location_name_, crime_weapon_, crime_text_};
+    Crime crime{crime_location_name_, crime_weapon_, crime_text_};
     evaluator_->evaluate(crime, [this](CrimeEvaluation eval) {
         crime_eval_ = std::move(eval);
         start_investigation();
@@ -320,7 +368,7 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         return;
     }
 
-    Crime crime{location_name_, crime_weapon_, crime_text_};
+    Crime crime{crime_location_name_, crime_weapon_, crime_text_};
     judge_->judge(crime, text, [this, player_id, text](GuessFeedback fb) {
         attempts_used_[player_id] = attempts_used_[player_id] + 1;
         pending_order_.pop_front();
@@ -398,6 +446,8 @@ void GameRoom::finish_round()
                {"criminal_id", criminal_id_},
                {"crime_text", crime_text_},
                {"weapon", crime_weapon_},
+               {"location", crime_location_name_},
+               {"location_id", crime_location_id_},
                {"crime_score", crime_eval_.score},
                {"evaluation", crime_eval_.evaluation},
                {"key_facts", crime_eval_.key_facts},

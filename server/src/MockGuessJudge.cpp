@@ -59,6 +59,7 @@ void MockGuessJudge::judge(
     const std::string method_half = text.substr(0, mid);
     const std::string concealment_half = text.substr(mid);
 
+    const bool location_match = contains(guess_text, crime.location);
     const bool weapon_match = contains(guess_text, crime.weapon);
     const double method_ratio = overlap_ratio(tokenize(method_half), guess_text);
     const double concealment_ratio = overlap_ratio(tokenize(concealment_half), guess_text);
@@ -66,14 +67,16 @@ void MockGuessJudge::judge(
 
     GuessFeedback fb;
     fb.aspects = {
+        {"장소", location_match ? "일치" : "불일치"},
         {"무기", weapon_match ? "일치" : "불일치"},
         {"살해 방법", verdict_from_ratio(method_ratio)},
         {"은닉 방법", verdict_from_ratio(concealment_ratio)},
     };
-    // Overall correctness still requires naming the weapon and covering at
-    // least half of the full crime text — see docs/DESIGN.md section 10's
-    // rejection of partial matches like "칼을 냉장고에 숨겼다".
-    fb.correct = weapon_match && overall_ratio >= 0.5;
+    // Overall correctness now also requires naming the location, since the
+    // criminal picks it freely instead of it being announced up front —
+    // see docs/DESIGN.md section 10's rejection of partial matches like
+    // "칼을 냉장고에 숨겼다".
+    fb.correct = location_match && weapon_match && overall_ratio >= 0.5;
 
     on_done(std::move(fb));
 }

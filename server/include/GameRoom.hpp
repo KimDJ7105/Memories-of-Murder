@@ -26,6 +26,14 @@ namespace mom {
 // single GameRoom directly inside GameServer; a RoomManager can wrap many
 // of these later (Phase 3) without GameRoom itself changing.
 //
+// The map (rooms + adjacency) and the weapon list are static board data,
+// not per-round state — the server never picks a location or weapon for a
+// round. The criminal freely chooses both when submitting the crime, so
+// both are secret (like the confession text) until `round_result` reveals
+// them. Room adjacency exists for future evaluators to judge movement
+// plausibility (docs/DESIGN.md section 7's "이동 및 실행 가능성"); Phase 1's
+// mock evaluator doesn't use it yet.
+//
 // Investigation is turn-based: detectives take one guess at a time in a
 // rotating queue (`pending_order_`), each guess gets immediate public
 // feedback, and the turn advances either when the answering detective
@@ -54,6 +62,7 @@ private:
     void handle_submit_guess(int player_id, const nlohmann::json& msg);
     void handle_next_turn(int player_id);
 
+    void broadcast_board_info();
     void start_round();
     void run_ai_judging();
     void start_investigation();
@@ -81,8 +90,8 @@ private:
     std::vector<int> criminal_queue_;
     int round_number_ = 0;
     int criminal_id_ = -1;
-    std::string location_id_;
-    std::string location_name_;
+    std::string crime_location_id_;
+    std::string crime_location_name_;
     std::string crime_weapon_;
     std::string crime_text_;
     CrimeEvaluation crime_eval_;

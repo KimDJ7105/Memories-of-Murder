@@ -90,9 +90,13 @@
   #map-wrap { text-align: center; margin-bottom: 14px; }
   #map-wrap svg { max-width: 100%; height: auto; }
   .room-rect { fill: #ddceac; stroke: var(--ink); stroke-width: 2; }
+  .room-rect.selectable { cursor: pointer; }
+  .room-rect.selectable:hover { fill: #e8dcb8; }
+  .room-rect.selected { fill: #d8b34a; }
   .room-rect.active { fill: var(--accent); opacity: 0.85; }
-  .room-label { font-family: Georgia, serif; font-size: 11px; fill: var(--ink); text-anchor: middle; }
+  .room-label { font-family: Georgia, serif; font-size: 11px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
   .room-rect.active + .room-label { fill: #fff; font-weight: bold; }
+  .room-edge { stroke: var(--rule); stroke-width: 1.5; stroke-dasharray: 3 3; }
 
   #weapon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
   .weapon-btn {
@@ -139,6 +143,7 @@
   <div id="map-wrap">
     <svg viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
       <rect x="1" y="1" width="298" height="198" fill="none" stroke="#8a7a55" stroke-width="1"/>
+      <g id="edges"></g>
       <rect id="room-attic" class="room-rect" x="2" y="2" width="98" height="98"/>
       <text class="room-label" x="51" y="55">다락방</text>
       <rect id="room-library" class="room-rect" x="101" y="2" width="98" height="98"/>
@@ -157,7 +162,7 @@
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
-    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요.</p>
+    <p>지도에서 범행 장소를 클릭하고, 흉기를 선택한 뒤, 범행을 자유롭게 서술하세요.</p>
     <div id="weapon-picker"></div>
     <textarea id="crime-text"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
@@ -200,6 +205,10 @@ const $ = (id) => document.getElementById(id);
 const log = (line) => { $('log').textContent += line + "\n"; $('log').scrollTop = $('log').scrollHeight; };
 
 const WEAPON_ICONS = { knife: '🔪', blunt: '🔨', rope: '🪢', poison: '🧪', gun: '🔫', candlestick: '🕯️' };
+const ROOM_CENTERS = {
+  attic: [51, 51], library: [150, 51], garden: [249, 51],
+  garage: [51, 149.5], kitchen: [150, 149.5], basement: [249, 149.5],
+};
 
 let ws = null;
 let myId = null;
@@ -208,6 +217,7 @@ let players = [];
 let roomState = 'Lobby';
 let availableWeapons = [];
 let selectedWeapon = null;
+let selectedLocation = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
 
@@ -235,12 +245,16 @@ function handleMessage(msg) {
       renderPlayers();
       if (roomState === 'Lobby') { show('lobby-screen'); hide('round-screen'); hide('result-screen'); }
       break;
+    case 'board_info':
+      availableWeapons = msg.weapons;
+      renderMapStructure(msg.edges);
+      break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
       $('round-title').textContent = `라운드 ${msg.round}`;
-      highlightRoom(msg.location_id);
-      availableWeapons = msg.available_weapons;
+      clearRoomHighlights();
       selectedWeapon = null;
+      selectedLocation = null;
       $('investigation-log').innerHTML = '';
       hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
       stopAdvanceCountdown();
@@ -252,6 +266,7 @@ function handleMessage(msg) {
       banner.className = 'role-banner ' + myRole;
       if (myRole === 'criminal') {
         renderWeaponPicker();
+        enableRoomPicking();
         $('crime-text').value = '';
         show('crime-writing-box'); hide('waiting-box');
       } else {
@@ -300,10 +315,47 @@ function handleMessage(msg) {
   }
 }
 
+function renderMapStructure(edges) {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const group = $('edges');
+  group.innerHTML = '';
+  edges.forEach(([a, b]) => {
+    const [x1, y1] = ROOM_CENTERS[a] ?? [0, 0];
+    const [x2, y2] = ROOM_CENTERS[b] ?? [0, 0];
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('class', 'room-edge');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    group.appendChild(line);
+  });
+}
+
+function clearRoomHighlights() {
+  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active', 'selected'));
+}
+
 function highlightRoom(locationId) {
-  document.querySelectorAll('.room-rect').forEach(r => r.classList.remove('active'));
+  clearRoomHighlights();
   const el = document.getElementById('room-' + locationId);
   if (el) el.classList.add('active');
+}
+
+function enableRoomPicking() {
+  document.querySelectorAll('.room-rect').forEach(r => {
+    r.classList.add('selectable');
+    r.onclick = () => {
+      selectedLocation = r.id.replace('room-', '');
+      document.querySelectorAll('.room-rect').forEach(x => x.classList.remove('selected'));
+      r.classList.add('selected');
+    };
+  });
+}
+
+function disableRoomPicking() {
+  document.querySelectorAll('.room-rect').forEach(r => {
+    r.classList.remove('selectable');
+    r.onclick = null;
+  });
 }
 
 function renderWeaponPicker() {
@@ -370,7 +422,7 @@ function renderRoundResult(msg) {
   }).join('');
   $('result-body').innerHTML = `
     <p><b>범인:</b> ${players.find(p => p.id === msg.criminal_id)?.name ?? msg.criminal_id}</p>
-    <p><b>흉기:</b> ${msg.weapon}</p>
+    <p><b>장소:</b> ${msg.location} / <b>흉기:</b> ${msg.weapon}</p>
     <p><b>범행 전문:</b> ${msg.crime_text}</p>
     <p><b>범행 점수:</b> ${msg.crime_score} — ${msg.evaluation}</p>
     <ul>${gained}</ul>
@@ -400,8 +452,10 @@ $('start-btn').onclick = () => send({ type: 'start_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;
+  if (!selectedLocation) { alert('지도에서 범행 장소를 선택하세요.'); return; }
   if (!selectedWeapon) { alert('흉기를 선택하세요.'); return; }
-  send({ type: 'submit_crime', text, weapon: selectedWeapon });
+  send({ type: 'submit_crime', text, weapon: selectedWeapon, location: selectedLocation });
+  disableRoomPicking();
   hide('crime-writing-box'); show('waiting-box');
   $('waiting-message').textContent = 'AI가 범행을 평가하는 중...';
 };
