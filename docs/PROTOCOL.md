@@ -8,6 +8,7 @@
 |---|---|---|
 | `join` | `name` | 최초 접속 시 반드시 먼저 보내야 함. Lobby 상태에서만 허용, 성공 시 `joined` 응답 |
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
+| `restart_game` | - | 방장만 가능, `GameOver` 상태에서만 허용. 같은 방·같은 플레이어로 점수/범인 이력을 초기화하고 Lobby로 되돌린다 (연결이 끊긴 플레이어는 이때 제거됨). 이후 다시 `start_game`을 보내면 새 게임이 시작된다 |
 | `submit_crime` | `text`, `weapon` | 범인만, `CrimeWriting` 상태에서만 허용. `weapon`은 `board_info`의 `weapons` 중 하나의 name이어야 함. 장소는 별도 필드가 아니라 `text` 안에 지도의 방 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 방 이름을 찾아 장소로 인식한다 |
 | `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용 |
 | `next_turn` | - | 방금 추리를 제출한 탐정 본인만, 10초 자동 전환을 기다리지 않고 바로 다음 차례로 넘길 때 |

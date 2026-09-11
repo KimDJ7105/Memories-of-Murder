@@ -70,6 +70,7 @@ public:
 
 private:
     void handle_start_game(int player_id);
+    void handle_restart_game(int player_id);
     void handle_submit_crime(int player_id, const nlohmann::json& msg);
     void handle_submit_guess(int player_id, const nlohmann::json& msg);
     void handle_next_turn(int player_id);

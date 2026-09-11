@@ -177,6 +177,7 @@
 <section id="gameover-screen" hidden>
   <h2>게임 종료</h2>
   <div id="gameover-body"></div>
+  <button id="restart-btn" hidden>새 게임 시작</button>
 </section>
 
 <h3>로그</h3>
@@ -220,7 +221,7 @@ function handleMessage(msg) {
       players = msg.players;
       roomState = msg.state;
       renderPlayers();
-      if (roomState === 'Lobby') { show('lobby-screen'); hide('round-screen'); hide('result-screen'); }
+      if (roomState === 'Lobby') { show('lobby-screen'); hide('round-screen'); hide('result-screen'); hide('gameover-screen'); }
       break;
     case 'board_info':
       availableWeapons = msg.weapons;
@@ -383,6 +384,7 @@ function renderGameOver(msg) {
       return `<li>${p ? p.name : id}: ${score}점${win}</li>`;
     }).join('');
   $('gameover-body').innerHTML = `<ul>${rows}</ul>`;
+  $('restart-btn').hidden = !players.find(p => p.id === myId)?.is_host;
 }
 
 function show(id) { $(id).hidden = false; }
@@ -394,6 +396,7 @@ $('join-btn').onclick = () => {
   send({ type: 'join', name });
 };
 $('start-btn').onclick = () => send({ type: 'start_game' });
+$('restart-btn').onclick = () => send({ type: 'restart_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;

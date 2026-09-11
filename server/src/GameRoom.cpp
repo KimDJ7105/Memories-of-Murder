@@ -118,6 +118,8 @@ void GameRoom::handle_message(int player_id, const nlohmann::json& msg)
 
     if (type == "start_game") {
         handle_start_game(player_id);
+    } else if (type == "restart_game") {
+        handle_restart_game(player_id);
     } else if (type == "submit_crime") {
         handle_submit_crime(player_id, msg);
     } else if (type == "submit_guess") {
@@ -152,6 +154,46 @@ void GameRoom::handle_start_game(int player_id)
     round_number_ = 0;
     broadcast_board_info();
     start_round();
+}
+
+void GameRoom::handle_restart_game(int player_id)
+{
+    if (state_ != GameState::GameOver) {
+        send_error(player_id, "게임이 끝난 후에만 다시 시작할 수 있습니다.");
+        return;
+    }
+    if (player_id != host_id_) {
+        send_error(player_id, "방장만 다시 시작할 수 있습니다.");
+        return;
+    }
+
+    // Drop anyone who disconnected during the last game so they don't
+    // count toward the 3~6 player check for the next one.
+    players_.erase(
+        std::remove_if(players_.begin(), players_.end(), [](const Player& p) { return !p.connected; }),
+        players_.end());
+
+    for (auto& p : players_) {
+        p.score = 0;
+        p.has_been_criminal = false;
+    }
+
+    criminal_queue_.clear();
+    round_number_ = 0;
+    criminal_id_ = -1;
+    crime_location_id_.clear();
+    crime_location_name_.clear();
+    crime_weapon_.clear();
+    crime_text_.clear();
+    crime_eval_ = CrimeEvaluation{};
+    pending_order_.clear();
+    attempts_used_.clear();
+    solved_at_attempt_.clear();
+    current_detective_ = -1;
+    awaiting_advance_ = false;
+
+    state_ = GameState::Lobby;
+    broadcast_room_update();
 }
 
 void GameRoom::broadcast_board_info()
