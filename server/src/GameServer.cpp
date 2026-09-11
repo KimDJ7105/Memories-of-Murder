@@ -35,6 +35,10 @@ void GameServer::on_message(const std::shared_ptr<Session>& session, const std::
         session->set_player_id(id);
         sessions_[id] = session;
         session->send({{"type", "joined"}, {"player_id", id}});
+        // handle_join already broadcast a room_update, but that happened
+        // before this session was registered above, so this player missed
+        // it — send them a snapshot directly now that they're registered.
+        room_.send_room_snapshot(id);
         return;
     }
 

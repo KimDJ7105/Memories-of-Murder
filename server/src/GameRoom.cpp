@@ -413,7 +413,7 @@ void GameRoom::finish_round()
     }
 }
 
-void GameRoom::broadcast_room_update()
+nlohmann::json GameRoom::build_room_update() const
 {
     nlohmann::json players_json = nlohmann::json::array();
     for (const auto& p : players_) {
@@ -425,10 +425,20 @@ void GameRoom::broadcast_room_update()
                                  {"is_host", p.id == host_id_}});
     }
 
-    sender_.broadcast({{"type", "room_update"},
-               {"state", to_string(state_)},
-               {"round", round_number_},
-               {"players", players_json}});
+    return {{"type", "room_update"},
+            {"state", to_string(state_)},
+            {"round", round_number_},
+            {"players", players_json}};
+}
+
+void GameRoom::broadcast_room_update()
+{
+    sender_.broadcast(build_room_update());
+}
+
+void GameRoom::send_room_snapshot(int player_id)
+{
+    sender_.send(player_id, build_room_update());
 }
 
 }

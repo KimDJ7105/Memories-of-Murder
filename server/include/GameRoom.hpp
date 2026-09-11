@@ -62,6 +62,12 @@ public:
     // joined (i.e. have a player id).
     void handle_message(int player_id, const nlohmann::json& msg);
 
+    // Sends the current room_update to just this one player. handle_join's
+    // own broadcast_room_update() fires before GameServer has registered
+    // the new session, so the joining player misses it — the caller must
+    // send them a snapshot right after registering the session.
+    void send_room_snapshot(int player_id);
+
 private:
     void handle_start_game(int player_id);
     void handle_submit_crime(int player_id, const nlohmann::json& msg);
@@ -77,6 +83,7 @@ private:
 
     void finish_round();
 
+    nlohmann::json build_room_update() const;
     void broadcast_room_update();
     void send_error(int player_id, const std::string& message);
     Player* find_player(int player_id);
