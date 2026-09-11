@@ -165,13 +165,13 @@
   <div id="crime-writing-box" hidden>
     <p>흉기를 선택하고, 범행을 자유롭게 서술하세요. (범행 장소와 흉기는 위 지도/목록에 있는 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
     <div id="weapon-picker"></div>
-    <textarea id="crime-text"></textarea>
+    <textarea id="crime-text" placeholder="예: 주방에서 칼을 이용해 피해자를 찌른 뒤, 그 칼을 냉장고 속 생선 배 안에 숨겼다.&#10;(장소 · 흉기 · 살해 방법 · 은닉 장소 · 은닉 방법이 자연스럽게 드러나도록 써보세요)"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
   </div>
 
   <div id="investigation-box" hidden>
     <p id="turn-banner"></p>
-    <textarea id="guess-text"></textarea>
+    <textarea id="guess-text" placeholder="다음을 맞춰보세요: 장소 · 흉기 · 살해 방법 · 은닉 장소 · 은닉 방법&#10;예: 범인은 주방에서 칼로 피해자를 찌른 뒤, 냉장고 속 생선 배 안에 칼을 숨겼을 것이다."></textarea>
     <button id="submit-guess-btn">추리 제출</button>
     <div id="guess-loading" class="loading-box" hidden><span class="spinner">●</span> AI가 추리를 판단 중입니다...</div>
     <div id="advance-box" hidden>
@@ -192,6 +192,10 @@
 <section id="result-screen" hidden>
   <h2>라운드 결과</h2>
   <div id="result-body"></div>
+  <div id="next-round-box">
+    <span id="next-round-countdown"></span>
+    <button id="next-round-btn" hidden>다음 라운드로</button>
+  </div>
 </section>
 
 <section id="gameover-screen" hidden>
@@ -218,6 +222,7 @@ let availableWeapons = [];
 let selectedWeapon = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
+let nextRoundCountdownTimer = null;
 
 function connect() {
   ws = new WebSocket('ws://localhost:9002');
@@ -256,6 +261,7 @@ function handleMessage(msg) {
       hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box'); hide('score-preview');
       hide('guess-loading');
       stopAdvanceCountdown();
+      stopNextRoundCountdown();
       break;
     case 'your_role':
       myRole = msg.role;
@@ -314,9 +320,12 @@ function handleMessage(msg) {
       show('result-screen'); hide('round-screen');
       stopAdvanceCountdown();
       renderRoundResult(msg);
+      $('next-round-btn').hidden = !players.find(p => p.id === myId)?.is_host;
+      startNextRoundCountdown();
       break;
     case 'game_over':
       show('gameover-screen'); hide('result-screen');
+      stopNextRoundCountdown();
       renderGameOver(msg);
       break;
     case 'error':
@@ -411,6 +420,20 @@ function stopAdvanceCountdown() {
   if (advanceCountdownTimer) { clearInterval(advanceCountdownTimer); advanceCountdownTimer = null; }
 }
 
+function startNextRoundCountdown() {
+  let remaining = 15;
+  $('next-round-countdown').textContent = `${remaining}초 후 자동으로 다음 라운드`;
+  nextRoundCountdownTimer = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) { stopNextRoundCountdown(); return; }
+    $('next-round-countdown').textContent = `${remaining}초 후 자동으로 다음 라운드`;
+  }, 1000);
+}
+function stopNextRoundCountdown() {
+  if (nextRoundCountdownTimer) { clearInterval(nextRoundCountdownTimer); nextRoundCountdownTimer = null; }
+  $('next-round-countdown').textContent = '';
+}
+
 function renderRoundResult(msg) {
   const gained = Object.entries(msg.scores_gained).map(([id, amt]) => {
     const p = players.find(pl => String(pl.id) === id);
@@ -469,6 +492,10 @@ $('submit-guess-btn').onclick = () => {
 $('next-turn-btn').onclick = () => {
   stopAdvanceCountdown();
   send({ type: 'next_turn' });
+};
+$('next-round-btn').onclick = () => {
+  stopNextRoundCountdown();
+  send({ type: 'next_round' });
 };
 
 connect();

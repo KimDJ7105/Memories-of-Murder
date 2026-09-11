@@ -44,6 +44,11 @@ namespace mom {
 // feedback, and the turn advances either when the answering detective
 // sends `next_turn` or after a 10s server-side timer fires — whichever
 // comes first.
+//
+// After a round ends, GameRoom sits in GameState::NextRound (rather than
+// immediately starting the next round) so players actually have time to
+// read round_result's reveal — the host can send `next_round` to move on
+// early, or a longer server-side timer does it automatically.
 class GameRoom {
 public:
     GameRoom(boost::asio::io_context& ioc,
@@ -74,6 +79,7 @@ private:
     void handle_submit_crime(int player_id, const nlohmann::json& msg);
     void handle_submit_guess(int player_id, const nlohmann::json& msg);
     void handle_next_turn(int player_id);
+    void handle_next_round(int player_id);
 
     void broadcast_board_info();
     void start_round();
@@ -83,6 +89,7 @@ private:
     void schedule_turn_advance();
 
     void finish_round();
+    void schedule_next_round_advance();
 
     nlohmann::json build_room_update() const;
     void broadcast_room_update();

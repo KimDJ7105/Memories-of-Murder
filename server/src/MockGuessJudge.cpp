@@ -70,6 +70,11 @@ void MockGuessJudge::judge(
         {"장소", location_match ? "일치" : "불일치"},
         {"무기", weapon_match ? "일치" : "불일치"},
         {"살해 방법", verdict_from_ratio(method_ratio)},
+        // Mock can't distinguish "where it was hidden" from "how it was
+        // hidden" within its crude first-half/second-half split, so both
+        // aspects reuse the same concealment-half ratio. The real
+        // OllamaGuessJudge tells them apart properly.
+        {"은닉 장소", verdict_from_ratio(concealment_ratio)},
         {"은닉 방법", verdict_from_ratio(concealment_ratio)},
     };
     // Overall correctness now also requires naming the location, since the

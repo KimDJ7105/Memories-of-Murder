@@ -17,6 +17,9 @@ constexpr int kMaxAttempts = 3;
 constexpr double kAttemptMultipliers[kMaxAttempts] = {1.0, 0.9, 0.8};
 constexpr int kCorrectBonus = 10;
 constexpr int kTurnSeconds = 10;
+// Longer than kTurnSeconds since there's more to read here: the full
+// crime confession, the AI's evaluation, and everyone's score changes.
+constexpr int kNextRoundSeconds = 15;
 
 }
 
@@ -131,6 +134,8 @@ void GameRoom::handle_message(int player_id, const nlohmann::json& msg)
         handle_submit_guess(player_id, msg);
     } else if (type == "next_turn") {
         handle_next_turn(player_id);
+    } else if (type == "next_round") {
+        handle_next_round(player_id);
     } else {
         send_error(player_id, "알 수 없는 메시지 유형입니다: " + type);
     }
@@ -506,8 +511,6 @@ void GameRoom::finish_round()
                {"scores_gained", gained_json},
                {"total_scores", total_scores}});
 
-    state_ = GameState::NextRound;
-
     if (criminal_queue_.empty()) {
         state_ = GameState::GameOver;
         int winner_id = -1;
@@ -517,9 +520,40 @@ void GameRoom::finish_round()
         }
         sender_.broadcast({{"type", "game_over"}, {"total_scores", total_scores}, {"winner_id", winner_id}});
         broadcast_room_update();
-    } else {
-        start_round();
+        return;
     }
+
+    // Wait here instead of immediately starting the next round, so players
+    // actually have time to read round_result's reveal (the crime, the
+    // score, who solved it) rather than it flashing by as the next
+    // round's round_start/your_role messages instantly hide it.
+    state_ = GameState::NextRound;
+    broadcast_room_update();
+    schedule_next_round_advance();
+}
+
+void GameRoom::schedule_next_round_advance()
+{
+    turn_timer_.expires_after(std::chrono::seconds(kNextRoundSeconds));
+    turn_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (ec) return;
+        if (state_ != GameState::NextRound) return;
+        start_round();
+    });
+}
+
+void GameRoom::handle_next_round(int player_id)
+{
+    if (state_ != GameState::NextRound) {
+        send_error(player_id, "지금은 다음 라운드로 넘길 수 없습니다.");
+        return;
+    }
+    if (player_id != host_id_) {
+        send_error(player_id, "방장만 다음 라운드로 넘길 수 있습니다.");
+        return;
+    }
+    turn_timer_.cancel();
+    start_round();
 }
 
 nlohmann::json GameRoom::build_room_update() const

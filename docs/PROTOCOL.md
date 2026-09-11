@@ -12,6 +12,7 @@
 | `submit_crime` | `text`, `weapon` | 범인만, `CrimeWriting` 상태에서만 허용. `weapon`은 `board_info`의 `weapons` 중 하나의 name이어야 하고, 그 이름이 `text` 안에도 실제로 등장해야 함(선택한 흉기와 서술이 어긋나는 것 방지). 장소도 별도 필드가 아니라 `text` 안에 지도의 방 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 방 이름을 찾아 장소로 인식한다 |
 | `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용. 이전 제출이 아직 AI 판정 중이면(`guess_pending`을 받은 뒤 `guess_feedback`이 오기 전) 거부됨 |
 | `next_turn` | - | 방금 추리를 제출한 탐정 본인만, 10초 자동 전환을 기다리지 않고 바로 다음 차례로 넘길 때 |
+| `next_round` | - | 방장만 가능, `NextRound` 상태에서만 허용. 15초 자동 전환을 기다리지 않고 바로 다음 라운드로 넘길 때 |
 
 ## Server → Client
 
@@ -25,7 +26,7 @@
 | `crime_score_revealed` | `score` | 범행 평가가 끝나자마자(탐정 조사가 시작되기 전) 점수만 전원에게 공개. 평가 이유·key_facts는 정답의 힌트가 될 수 있어 `round_result`까지 비공개 |
 | `investigation_turn_start` | `detective_id`, `attempt` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회) |
 | `guess_pending` | - | 방금 제출한 탐정 본인에게만: AI가 판정 중이라는 뜻. 판정이 끝날 때까지 그 탐정은 재제출할 수 없다 |
-| `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. 전원에게 공개 |
+| `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 장소"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. "은닉 장소"(어디에 숨겼는지)와 "은닉 방법"(어떻게 숨겼는지)은 서로 다른 항목. 전원에게 공개 |
 | `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
@@ -36,7 +37,7 @@
 Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Result → NextRound → (다음 라운드 | GameOver)
 ```
 
-`RoleAssignment`/`AIJudging`/`Result`/`NextRound`는 서버가 즉시 통과시키는 내부 상태로, 별도 클라이언트 입력을 기다리지 않는다. 클라이언트가 실제로 입력을 보내야 하는 상태는 `CrimeWriting`과 `Investigation`뿐이다.
+`RoleAssignment`/`AIJudging`/`Result`는 서버가 즉시 통과시키는 내부 상태다. `NextRound`는 예외로, `round_result`를 보낸 뒤 곧장 다음 라운드로 넘어가지 않고 실제로 15초(또는 방장의 `next_round`) 동안 이 상태에 머문다 — 그러지 않으면 결과 화면이 뜨자마자 다음 라운드의 `round_start`가 도착해 읽을 새도 없이 사라진다. 클라이언트가 실제로 입력을 보내야 하는 상태는 `CrimeWriting`, `Investigation`, `NextRound`(방장만) 세 가지다.
 
 ## Investigation은 턴제
 
