@@ -5,6 +5,8 @@
 
 #include <boost/system/error_code.hpp>
 
+#include "AiTestLog.hpp"
+
 namespace mom {
 
 namespace {
@@ -294,7 +296,18 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
 void GameRoom::run_ai_judging()
 {
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
-    evaluator_->evaluate(crime, [this](CrimeEvaluation eval) {
+    const int round = round_number_;
+    const int criminal_id = criminal_id_;
+    evaluator_->evaluate(crime, [this, crime, round, criminal_id](CrimeEvaluation eval) {
+        log_ai_test_event({{"type", "crime_evaluation"},
+                            {"round", round},
+                            {"criminal_id", criminal_id},
+                            {"location", crime.location},
+                            {"weapon", crime.weapon},
+                            {"crime_text", crime.text},
+                            {"score", eval.score},
+                            {"evaluation", eval.evaluation},
+                            {"key_facts", eval.key_facts}});
         crime_eval_ = std::move(eval);
         start_investigation();
     });
@@ -354,7 +367,7 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
     }
 
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
-    judge_->judge(crime, text, [this, player_id, text](GuessFeedback fb) {
+    judge_->judge(crime, text, [this, player_id, text, crime](GuessFeedback fb) {
         attempts_used_[player_id] = attempts_used_[player_id] + 1;
         pending_order_.pop_front();
 
@@ -368,6 +381,17 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         for (const auto& a : fb.aspects) {
             aspects_json.push_back({{"aspect", a.aspect}, {"verdict", a.verdict}});
         }
+
+        log_ai_test_event({{"type", "guess_judging"},
+                            {"round", round_number_},
+                            {"player_id", player_id},
+                            {"attempt", attempts_used_[player_id]},
+                            {"guess_text", text},
+                            {"crime_text", crime.text},
+                            {"location", crime.location},
+                            {"weapon", crime.weapon},
+                            {"correct", fb.correct},
+                            {"aspects", aspects_json}});
 
         sender_.broadcast({{"type", "guess_feedback"},
                    {"player_id", player_id},

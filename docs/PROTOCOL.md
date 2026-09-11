@@ -60,7 +60,19 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
 
 지도 데이터는 순수하게 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다. 클라이언트는 지금 이 데이터를 방 이름 + 인접한 방 목록으로 된 텍스트 목록으로만 보여준다. `image` 필드는 나중에 실제 배경 이미지를 붙이게 될 때를 위해 남겨둔 자리이며, 그때 가서 이미지 위에 방 영역을 표시(클릭/강조 등)해야 하는 구체적인 기능이 생기면 그때 좌표를 추가하면 된다 — 지금은 그런 기능이 없어서 좌표를 미리 넣지 않았다.
 
-## Phase 1의 임시 구현
+## AI 백엔드 (Phase 2)
 
-- `CrimeEvaluator`, `GuessJudge`는 각각 `MockCrimeEvaluator`/`MockGuessJudge`로, AI 호출 없이 텍스트 길이·키워드 매칭만으로 동작하는 임시 구현이다. Phase 2에서 Ollama 기반 구현으로 교체될 인터페이스(`ICrimeEvaluator`, `IGuessJudge`, 둘 다 `server/include/`)만 유지하면 된다.
-- `aspects`의 "살해 방법"/"은닉 방법" 구분도 지금은 범행 텍스트를 절반으로 대충 나눈 휴리스틱이다. 실제 구조화 추출은 Phase 2에서 AI가 `key_facts` 기반으로 담당한다.
+`ICrimeEvaluator`/`IGuessJudge`는 그대로지만, 기본 구현이 `MockCrimeEvaluator`/`MockGuessJudge`(키워드 매칭)에서 `OllamaCrimeEvaluator`/`OllamaGuessJudge`(로컬 Ollama 모델 호출)로 바뀌었다. `GameServer`가 시작 시 환경변수로 어느 쪽을 쓸지 고른다:
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `MOM_AI_BACKEND` | `ollama` | `mock`으로 주면 Ollama 없이도 예전처럼 결정적인 Mock으로 동작 (빠른 스크립트 테스트용) |
+| `MOM_OLLAMA_MODEL` | `exaone3.5:7.8b` | 사용할 모델 태그. `ollama pull`로 받아둔 모델이어야 함 |
+| `MOM_OLLAMA_HOST` | `localhost` | |
+| `MOM_OLLAMA_PORT` | `11434` | |
+
+`server/src/OllamaClient.cpp`가 `/api/chat`을 `format:"json"`, `stream:false`로 호출하는 비동기 HTTP 클라이언트다 — 게임 서버와 같은 io_context 스레드에서 동작하므로 AI 응답을 기다리는 동안에도 다른 플레이어의 WebSocket 트래픽은 막히지 않는다. 모델 응답은 필드 단위로 검증되고(타입이 안 맞거나 누락된 필드는 안전한 기본값으로 대체), 연결 실패·타임아웃·JSON 파싱 실패 시에도 예외를 던지지 않고 라운드가 계속 진행될 수 있는 값을 반환한다 (범행 평가 실패 시 50점 기본 부여, 추리 판정 실패 시 오답 처리).
+
+Ollama는 모델을 처음 요청받을 때 VRAM에 올리는데 이 콜드 스타트가 몇십 초씩 걸릴 수 있어서, `GameServer` 생성 시점에 더미 요청을 한 번 미리 보내 예열한다 (콘솔에 `Ollama warm-up complete.` 출력).
+
+`AI_TEST_MODE=true`로 서버를 켜면 모든 범행 평가/추리 판정 호출이 `logs/ai_test/YYYY-MM-DD.jsonl`에 한 줄씩 기록된다 (원본 텍스트, 모델 응답 파싱 결과, 실패 사유 등) — 프롬프트 튜닝이나 모델 비교용.

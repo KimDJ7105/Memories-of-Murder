@@ -3,6 +3,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(game_server
     src/main.cpp
+    src/AiTestLog.cpp
     src/GameData.cpp
     src/GameRoom.cpp
     src/GameServer.cpp
@@ -10,6 +11,9 @@ add_executable(game_server
     src/Listener.cpp
     src/MockCrimeEvaluator.cpp
     src/MockGuessJudge.cpp
+    src/OllamaClient.cpp
+    src/OllamaCrimeEvaluator.cpp
+    src/OllamaGuessJudge.cpp
 )
 
 target_include_directories(game_server PRIVATE include)
