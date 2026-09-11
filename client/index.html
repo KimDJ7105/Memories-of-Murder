@@ -95,13 +95,6 @@
   #map-wrap .room-links { color: var(--ink-faded); }
   #weapon-list-wrap ul { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
-  #weapon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-  .weapon-btn {
-    margin-top: 0; background: #fbf6e6; color: var(--ink); border: 1px solid var(--rule);
-    text-transform: none; letter-spacing: 0;
-  }
-  .weapon-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
-
   #score-preview {
     font-weight: bold; text-align: center; padding: 8px; margin-bottom: 12px;
     border: 2px dashed var(--rule); background: rgba(216,179,74,0.15);
@@ -163,8 +156,7 @@
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
-    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요. (범행 장소와 흉기는 위 지도/목록에 있는 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
-    <div id="weapon-picker"></div>
+    <p>범행을 자유롭게 서술하세요. (장소와 흉기는 위 지도/목록에 있는 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
     <textarea id="crime-text" placeholder="예: 주방에서 칼을 이용해 피해자를 찌른 뒤, 그 칼을 냉장고 속 생선 배 안에 숨겼다.&#10;(장소 · 흉기 · 살해 방법 · 은닉 장소 · 은닉 방법이 자연스럽게 드러나도록 써보세요)"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
   </div>
@@ -219,7 +211,6 @@ let myRole = null;
 let players = [];
 let roomState = 'Lobby';
 let availableWeapons = [];
-let selectedWeapon = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
 let nextRoundCountdownTimer = null;
@@ -256,7 +247,6 @@ function handleMessage(msg) {
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
       $('round-title').textContent = `라운드 ${msg.round}`;
-      selectedWeapon = null;
       $('investigation-log').innerHTML = '';
       hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box'); hide('score-preview');
       hide('guess-loading');
@@ -269,7 +259,6 @@ function handleMessage(msg) {
       banner.textContent = myRole === 'criminal' ? '당신은 범인입니다' : '당신은 탐정입니다';
       banner.className = 'role-banner ' + myRole;
       if (myRole === 'criminal') {
-        renderWeaponPicker();
         $('crime-text').value = '';
         $('crime-text').disabled = false;
         $('submit-crime-btn').disabled = false;
@@ -361,19 +350,6 @@ function renderWeaponList() {
   $('weapon-list').innerHTML = availableWeapons.map(w =>
     `<li>${WEAPON_ICONS[w.id] || ''} ${w.name}</li>`
   ).join('');
-}
-
-function renderWeaponPicker() {
-  $('weapon-picker').innerHTML = availableWeapons.map(w =>
-    `<button type="button" class="weapon-btn" data-name="${w.name}">${WEAPON_ICONS[w.id] || ''} ${w.name}</button>`
-  ).join('');
-  document.querySelectorAll('.weapon-btn').forEach(btn => {
-    btn.onclick = () => {
-      selectedWeapon = btn.dataset.name;
-      document.querySelectorAll('.weapon-btn').forEach(b => b.classList.remove('selected'));
-      btn.classList.add('selected');
-    };
-  });
 }
 
 function renderPlayers() {
@@ -473,8 +449,7 @@ $('restart-btn').onclick = () => send({ type: 'restart_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;
-  if (!selectedWeapon) { alert('흉기를 선택하세요.'); return; }
-  send({ type: 'submit_crime', text, weapon: selectedWeapon });
+  send({ type: 'submit_crime', text });
   hide('crime-writing-box'); show('waiting-box');
   $('waiting-message').textContent = 'AI가 범행을 평가하는 중...';
 };

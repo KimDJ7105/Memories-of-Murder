@@ -276,30 +276,21 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         return;
     }
     const std::string text = msg.value("text", "");
-    const std::string weapon = msg.value("weapon", "");
     if (text.empty()) {
         send_error(player_id, "범행 내용을 입력하세요.");
         return;
     }
-    if (!data_.is_valid_weapon(weapon)) {
-        send_error(player_id, "유효한 흉기를 선택하세요.");
+    // Neither location nor weapon is a separate field — the criminal only
+    // ever writes free text, and both are extracted from it by matching
+    // against the map's room names / the weapon list. This also keeps
+    // them consistent with the narrative by construction: there's no way
+    // for the "official" weapon to disagree with what the text actually
+    // describes, since it's read from the same text.
+    const WeaponDef* weapon = data_.extract_weapon_mention(text);
+    if (!weapon) {
+        send_error(player_id, "범행 내용에 사용 가능한 흉기 이름을 포함해 주세요.");
         return;
     }
-    // The weapon picker is a separate UI control from the free-text
-    // narrative, so nothing else forces them to agree — without this
-    // check a criminal could pick "총" but write a narrative about
-    // bludgeoning someone with a candlestick, and the judge would then
-    // reasonably score guesses against what the *text* actually
-    // describes, silently disagreeing with the picked weapon. Requiring
-    // the picked weapon's name to appear in the text keeps both sources
-    // of truth consistent.
-    if (text.find(weapon) == std::string::npos) {
-        send_error(player_id, "범행 내용에 선택한 흉기(" + weapon + ")를 포함해 주세요.");
-        return;
-    }
-    // Location isn't a separate field — the criminal only writes free
-    // text (plus picks a weapon), and the location is extracted from that
-    // text by matching it against the map's known room names.
     const RoomDef* room = data_.extract_room_mention(text);
     if (!room) {
         send_error(player_id, "범행 내용에 지도에 있는 구체적인 장소를 포함해 주세요.");
@@ -307,7 +298,7 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
     }
 
     crime_text_ = text;
-    crime_weapon_ = weapon;
+    crime_weapon_ = weapon->name;
     crime_location_id_ = room->id;
     crime_location_name_ = room->name;
     state_ = GameState::AIJudging;

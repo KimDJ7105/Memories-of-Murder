@@ -62,14 +62,6 @@ const RoomDef* GameData::find_room(const std::string& id) const
     return nullptr;
 }
 
-bool GameData::is_valid_weapon(const std::string& name) const
-{
-    for (const auto& w : weapons) {
-        if (w.name == name) return true;
-    }
-    return false;
-}
-
 const RoomDef* GameData::extract_room_mention(const std::string& text) const
 {
     const RoomDef* best = nullptr;
@@ -79,6 +71,20 @@ const RoomDef* GameData::extract_room_mention(const std::string& text) const
         if (pos != std::string::npos && pos < best_pos) {
             best_pos = pos;
             best = &r;
+        }
+    }
+    return best;
+}
+
+const WeaponDef* GameData::extract_weapon_mention(const std::string& text) const
+{
+    const WeaponDef* best = nullptr;
+    std::string::size_type best_pos = std::string::npos;
+    for (const auto& w : weapons) {
+        const auto pos = text.find(w.name);
+        if (pos != std::string::npos && pos < best_pos) {
+            best_pos = pos;
+            best = &w;
         }
     }
     return best;

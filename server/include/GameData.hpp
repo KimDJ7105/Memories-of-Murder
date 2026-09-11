@@ -35,13 +35,17 @@ struct GameData {
     std::vector<WeaponDef> weapons;
 
     const RoomDef* find_room(const std::string& id) const;
-    bool is_valid_weapon(const std::string& name) const;
 
-    // Placeholder for real language understanding: returns the room whose
-    // name appears earliest in the free-text crime, or nullptr if none of
-    // the map's rooms are mentioned at all. Phase 2's AI evaluator should
-    // take over this extraction (docs/DESIGN.md section 8).
+    // Placeholder for real language understanding: returns the room/weapon
+    // whose name appears earliest in the free-text crime, or nullptr if
+    // none of the map's rooms/the weapon list are mentioned at all. Both
+    // location and weapon are extracted this way — the criminal only ever
+    // writes free text, with no separate location or weapon UI selection
+    // (docs/DESIGN.md section 6: crime writing is free-text only). Phase
+    // 2's AI evaluator should eventually take over this extraction
+    // (docs/DESIGN.md section 8).
     const RoomDef* extract_room_mention(const std::string& text) const;
+    const WeaponDef* extract_weapon_mention(const std::string& text) const;
 
     static GameData load_default();
 };

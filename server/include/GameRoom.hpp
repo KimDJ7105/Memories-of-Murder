@@ -29,15 +29,15 @@ namespace mom {
 //
 // The map (rooms + adjacency) and the weapon list are static board data
 // loaded from server/data/*.json (see GameData) — not per-round state, and
-// never picked by the server. The criminal writes the crime as free text
-// (no location/weapon UI selection beyond picking a weapon); the location
-// is extracted from that text by matching it against the map's room names
-// (GameData::extract_room_mention — a placeholder for real AI extraction
-// in Phase 2). Both location and weapon stay secret, like the confession
-// text itself, until `round_result` reveals them. Room adjacency exists
-// for future evaluators to judge movement plausibility (docs/DESIGN.md
-// section 7's "이동 및 실행 가능성"); Phase 1's mock evaluator doesn't use
-// it yet.
+// never picked by the server. The criminal writes the crime entirely as
+// free text, with no location or weapon UI selection at all; both are
+// extracted from that text by matching it against the map's room names /
+// the weapon list (GameData::extract_room_mention /
+// extract_weapon_mention — placeholders for real AI extraction in a
+// later phase). Both stay secret, like the confession text itself, until
+// `round_result` reveals them. Room adjacency exists for future
+// evaluators to judge movement plausibility (docs/DESIGN.md section 7's
+// "이동 및 실행 가능성"); Phase 1's mock evaluator doesn't use it yet.
 //
 // Investigation is turn-based: detectives take one guess at a time in a
 // rotating queue (`pending_order_`), each guess gets immediate public
