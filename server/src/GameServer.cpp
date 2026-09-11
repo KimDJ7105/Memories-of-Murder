@@ -27,7 +27,7 @@ struct AiConfig {
 AiConfig resolve_ai_config()
 {
     return {env_or("MOM_AI_BACKEND", "ollama"),
-            env_or("MOM_OLLAMA_MODEL", "exaone3.5:7.8b"),
+            env_or("MOM_OLLAMA_MODEL", "qwen2.5:7b"),
             env_or("MOM_OLLAMA_HOST", "localhost"),
             env_or("MOM_OLLAMA_PORT", "11434")};
 }

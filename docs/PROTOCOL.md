@@ -72,11 +72,13 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
 | 환경변수 | 기본값 | 설명 |
 |---|---|---|
 | `MOM_AI_BACKEND` | `ollama` | `mock`으로 주면 Ollama 없이도 예전처럼 결정적인 Mock으로 동작 (빠른 스크립트 테스트용) |
-| `MOM_OLLAMA_MODEL` | `exaone3.5:7.8b` | 사용할 모델 태그. `ollama pull`로 받아둔 모델이어야 함 |
+| `MOM_OLLAMA_MODEL` | `qwen2.5:7b` | 사용할 모델 태그. `ollama pull`로 받아둔 모델이어야 함 |
 | `MOM_OLLAMA_HOST` | `localhost` | |
 | `MOM_OLLAMA_PORT` | `11434` | |
 
-`server/src/OllamaClient.cpp`가 `/api/chat`을 `format:"json"`, `stream:false`로 호출하는 비동기 HTTP 클라이언트다 — 게임 서버와 같은 io_context 스레드에서 동작하므로 AI 응답을 기다리는 동안에도 다른 플레이어의 WebSocket 트래픽은 막히지 않는다. 모델 응답은 필드 단위로 검증되고(타입이 안 맞거나 누락된 필드는 안전한 기본값으로 대체), 연결 실패·타임아웃·JSON 파싱 실패 시에도 예외를 던지지 않고 라운드가 계속 진행될 수 있는 값을 반환한다 (범행 평가 실패 시 50점 기본 부여, 추리 판정 실패 시 오답 처리).
+`server/src/OllamaClient.cpp`가 `/api/chat`을 `format:"json"`, `stream:false`, `temperature:0.2`(판정관/평가관 역할이라 창의성보다 일관성이 중요)로 호출하는 비동기 HTTP 클라이언트다 — 게임 서버와 같은 io_context 스레드에서 동작하므로 AI 응답을 기다리는 동안에도 다른 플레이어의 WebSocket 트래픽은 막히지 않는다. 모델 응답은 필드 단위로 검증되고(타입이 안 맞거나 누락된 필드는 안전한 기본값으로 대체), 연결 실패·타임아웃·JSON 파싱 실패 시에도 예외를 던지지 않고 라운드가 계속 진행될 수 있는 값을 반환한다 (범행 평가 실패 시 50점 기본 부여, 추리 판정 실패 시 오답 처리).
+
+**모델 선택 참고**: 처음엔 `exaone3.5:7.8b`(LG, 한국어 특화)를 기본으로 썼는데, 실제 플레이 중 "몰라"/"음..." 같은 의미 없는 추리에도 흉기 등 일부 항목을 "일치"로 잘못 판정하는 문제가 발견됐다. 프롬프트에 명시적 예시를 추가하고 temperature를 낮춰도 재현됐고(완전히 동일한 오판정이 반복됨), `qwen2.5:7b`로 바꾸니 같은 입력에서 문제가 없었다. 그래서 기본값을 `qwen2.5:7b`로 바꿨다 — `MOM_OLLAMA_MODEL=exaone3.5:7.8b`로 언제든 되돌려서 비교할 수 있다.
 
 Ollama는 모델을 처음 요청받을 때 VRAM에 올리는데 이 콜드 스타트가 몇십 초씩 걸릴 수 있어서, `GameServer` 생성 시점에 더미 요청을 한 번 미리 보내 예열한다 (콘솔에 `Ollama warm-up complete.` 출력).
 

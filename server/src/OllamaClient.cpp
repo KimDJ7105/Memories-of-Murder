@@ -40,10 +40,17 @@ void OllamaClient::chat_json(const std::string& model,
     // crime/guess text (which may contain quotes, newlines, backslashes)
     // is always escaped correctly — never hand-interpolate user text into
     // a JSON literal.
+    //
+    // Low temperature on purpose: every caller here is a judge/evaluator
+    // that's supposed to read carefully and answer consistently, not
+    // write creatively — a lower temperature measurably cut down on the
+    // model inventing a match for content that plainly wasn't there
+    // (e.g. judging a one-word non-answer as matching the weapon).
     const nlohmann::json body = {
         {"model", model},
         {"stream", false},
         {"format", "json"},
+        {"options", {{"temperature", 0.2}}},
         {"messages", nlohmann::json::array({
              {{"role", "system"}, {"content", system_prompt}},
              {{"role", "user"}, {"content", user_prompt}},

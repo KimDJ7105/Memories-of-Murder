@@ -234,7 +234,10 @@ void GameRoom::start_round()
 
     criminal_id_ = criminal_queue_.front();
     criminal_queue_.erase(criminal_queue_.begin());
-    if (Player* criminal = find_player(criminal_id_)) criminal->has_been_criminal = true;
+    // has_been_criminal is set once this player's round as criminal is
+    // actually over (in finish_round), not here — setting it this early
+    // showed the "범인 완료" badge on a player who was still in the
+    // middle of writing their crime.
 
     round_number_++;
 
@@ -469,6 +472,8 @@ void GameRoom::handle_next_turn(int player_id)
 void GameRoom::finish_round()
 {
     state_ = GameState::Result;
+
+    if (Player* criminal = find_player(criminal_id_)) criminal->has_been_criminal = true;
 
     std::map<int, int> gained;
     const bool anyone_solved = !solved_at_attempt_.empty();

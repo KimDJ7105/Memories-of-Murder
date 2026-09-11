@@ -23,7 +23,11 @@ namespace mom {
 // Mock implementations for fast scripted tests that shouldn't depend on
 // Ollama being up) never requires touching GameRoom itself:
 //   MOM_AI_BACKEND   "ollama" (default) or "mock"
-//   MOM_OLLAMA_MODEL model tag, default "exaone3.5:7.8b"
+//   MOM_OLLAMA_MODEL model tag, default "qwen2.5:7b" (exaone3.5:7.8b was
+//                    tried first but showed a real weakness: it sometimes
+//                    judged a meaningless guess like "몰라" as matching
+//                    the weapon anyway, even with a stricter prompt and
+//                    lower temperature — qwen2.5:7b didn't have this problem)
 //   MOM_OLLAMA_HOST  default "localhost"
 //   MOM_OLLAMA_PORT  default "11434"
 class GameServer : public MessageSender {
