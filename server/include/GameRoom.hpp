@@ -115,7 +115,23 @@ private:
     std::map<int, int> attempts_used_;
     std::map<int, int> solved_at_attempt_;
     int current_detective_ = -1;
+    // True from the moment a guess is accepted until judge_->judge()'s
+    // callback fires — guards against a second submit_guess (e.g. a
+    // double-click before the client disables its button) starting a
+    // second concurrent judging call for the same turn, which would pop
+    // pending_order_ twice and corrupt whose turn it is.
+    bool guess_in_flight_ = false;
+    // True from when guess_feedback has been shown until next_turn/the
+    // 10s timer actually advances the turn.
     bool awaiting_advance_ = false;
+    // Bumped whenever the turn/round moves on independently of a pending
+    // AI call (begin_next_turn, a new round, or a criminal disconnect
+    // aborting the round). An in-flight judge_->judge() callback captures
+    // this value at submission time and compares it before touching any
+    // state, so a result that arrives after (say) the answering detective
+    // disconnected mid-call is discarded instead of corrupting whatever
+    // turn/round is active by then.
+    int turn_generation_ = 0;
 };
 
 }

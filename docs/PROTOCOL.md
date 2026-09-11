@@ -9,8 +9,8 @@
 | `join` | `name` | 최초 접속 시 반드시 먼저 보내야 함. Lobby 상태에서만 허용, 성공 시 `joined` 응답 |
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
 | `restart_game` | - | 방장만 가능, `GameOver` 상태에서만 허용. 같은 방·같은 플레이어로 점수/범인 이력을 초기화하고 Lobby로 되돌린다 (연결이 끊긴 플레이어는 이때 제거됨). 이후 다시 `start_game`을 보내면 새 게임이 시작된다 |
-| `submit_crime` | `text`, `weapon` | 범인만, `CrimeWriting` 상태에서만 허용. `weapon`은 `board_info`의 `weapons` 중 하나의 name이어야 함. 장소는 별도 필드가 아니라 `text` 안에 지도의 방 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 방 이름을 찾아 장소로 인식한다 |
-| `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용 |
+| `submit_crime` | `text`, `weapon` | 범인만, `CrimeWriting` 상태에서만 허용. `weapon`은 `board_info`의 `weapons` 중 하나의 name이어야 하고, 그 이름이 `text` 안에도 실제로 등장해야 함(선택한 흉기와 서술이 어긋나는 것 방지). 장소도 별도 필드가 아니라 `text` 안에 지도의 방 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 방 이름을 찾아 장소로 인식한다 |
+| `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용. 이전 제출이 아직 AI 판정 중이면(`guess_pending`을 받은 뒤 `guess_feedback`이 오기 전) 거부됨 |
 | `next_turn` | - | 방금 추리를 제출한 탐정 본인만, 10초 자동 전환을 기다리지 않고 바로 다음 차례로 넘길 때 |
 
 ## Server → Client
@@ -22,7 +22,9 @@
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
+| `crime_score_revealed` | `score` | 범행 평가가 끝나자마자(탐정 조사가 시작되기 전) 점수만 전원에게 공개. 평가 이유·key_facts는 정답의 힌트가 될 수 있어 `round_result`까지 비공개 |
 | `investigation_turn_start` | `detective_id`, `attempt` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회) |
+| `guess_pending` | - | 방금 제출한 탐정 본인에게만: AI가 판정 중이라는 뜻. 판정이 끝날 때까지 그 탐정은 재제출할 수 없다 |
 | `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. 전원에게 공개 |
 | `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |

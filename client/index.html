@@ -87,12 +87,13 @@
   .role-banner.criminal { background: #e5c9c9; }
   .role-banner.detective { background: #c9d3e5; }
 
-  #map-wrap { margin-bottom: 14px; font-size: 0.9em; }
-  #map-wrap .map-name { font-weight: bold; margin-bottom: 6px; }
-  #map-wrap ul { list-style: none; padding: 0; margin: 0; }
+  #map-wrap, #weapon-list-wrap { margin-bottom: 14px; font-size: 0.9em; }
+  #map-wrap .map-name, #weapon-list-wrap .weapon-list-name { font-weight: bold; margin-bottom: 6px; }
+  #map-wrap ul, #weapon-list-wrap ul { list-style: none; padding: 0; margin: 0; }
   #map-wrap li { padding: 2px 0; }
   #map-wrap .room-name { font-weight: bold; }
   #map-wrap .room-links { color: var(--ink-faded); }
+  #weapon-list-wrap ul { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
   #weapon-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
   .weapon-btn {
@@ -100,6 +101,17 @@
     text-transform: none; letter-spacing: 0;
   }
   .weapon-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  #score-preview {
+    font-weight: bold; text-align: center; padding: 8px; margin-bottom: 12px;
+    border: 2px dashed var(--rule); background: rgba(216,179,74,0.15);
+  }
+
+  .loading-box { text-align: center; font-style: italic; color: var(--ink-faded); padding: 10px; }
+  .loading-box .spinner { display: inline-block; animation: loading-pulse 1s ease-in-out infinite; }
+  @keyframes loading-pulse {
+    0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
+  }
 
   #investigation-log { margin-top: 10px; }
   .log-entry { border-left: 3px solid var(--rule); padding: 6px 10px; margin-bottom: 8px; background: rgba(255,252,240,0.5); }
@@ -141,10 +153,17 @@
     <ul id="map-rooms"></ul>
   </div>
 
+  <div id="weapon-list-wrap">
+    <p class="weapon-list-name">사용 가능한 흉기</p>
+    <ul id="weapon-list"></ul>
+  </div>
+
+  <div id="score-preview" hidden></div>
+
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
-    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요. (범행 장소는 위 지도에 있는 방 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
+    <p>흉기를 선택하고, 범행을 자유롭게 서술하세요. (범행 장소와 흉기는 위 지도/목록에 있는 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
     <div id="weapon-picker"></div>
     <textarea id="crime-text"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
@@ -154,6 +173,7 @@
     <p id="turn-banner"></p>
     <textarea id="guess-text"></textarea>
     <button id="submit-guess-btn">추리 제출</button>
+    <div id="guess-loading" class="loading-box" hidden><span class="spinner">●</span> AI가 추리를 판단 중입니다...</div>
     <div id="advance-box" hidden>
       <span id="advance-countdown"></span>
       <button id="next-turn-btn">다음 차례로</button>
@@ -161,7 +181,7 @@
   </div>
 
   <div id="waiting-box" hidden>
-    <p id="waiting-message">다른 플레이어를 기다리는 중...</p>
+    <p id="waiting-message" class="loading-box">다른 플레이어를 기다리는 중...</p>
   </div>
 
   <div id="investigation-log"></div>
@@ -226,13 +246,15 @@ function handleMessage(msg) {
     case 'board_info':
       availableWeapons = msg.weapons;
       renderMap(msg.map, msg.rooms, msg.edges);
+      renderWeaponList();
       break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
       $('round-title').textContent = `라운드 ${msg.round}`;
       selectedWeapon = null;
       $('investigation-log').innerHTML = '';
-      hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
+      hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box'); hide('score-preview');
+      hide('guess-loading');
       stopAdvanceCountdown();
       break;
     case 'your_role':
@@ -243,15 +265,21 @@ function handleMessage(msg) {
       if (myRole === 'criminal') {
         renderWeaponPicker();
         $('crime-text').value = '';
+        $('crime-text').disabled = false;
+        $('submit-crime-btn').disabled = false;
         show('crime-writing-box'); hide('waiting-box');
       } else {
         hide('crime-writing-box'); show('waiting-box');
         $('waiting-message').textContent = '범인이 범행을 작성하는 중...';
       }
       break;
+    case 'crime_score_revealed':
+      $('score-preview').textContent = `이번 범행의 AI 평가 점수: ${msg.score}점`;
+      show('score-preview');
+      break;
     case 'investigation_turn_start':
       currentDetectiveId = msg.detective_id;
-      hide('advance-box'); stopAdvanceCountdown();
+      hide('advance-box'); hide('guess-loading'); stopAdvanceCountdown();
       renderPlayers();
       if (currentDetectiveId === myId) {
         show('investigation-box'); hide('waiting-box'); hide('crime-writing-box');
@@ -259,17 +287,25 @@ function handleMessage(msg) {
         $('guess-text').value = '';
         $('guess-text').disabled = false;
         $('submit-guess-btn').disabled = false;
+        show('guess-text'); show('submit-guess-btn');
       } else {
         hide('investigation-box'); hide('crime-writing-box'); show('waiting-box');
         const name = players.find(p => p.id === currentDetectiveId)?.name ?? currentDetectiveId;
         $('waiting-message').textContent = `${name} 탐정의 차례입니다 (${msg.attempt}번째 시도)`;
       }
       break;
+    case 'guess_pending':
+      // Server has accepted this player's guess and is waiting on the AI;
+      // swap the form out for a loading indicator immediately so a
+      // double-click (or a slow network) can't fire a second submit_guess
+      // for the same turn.
+      hide('guess-text'); hide('submit-guess-btn');
+      show('guess-loading');
+      break;
     case 'guess_feedback':
       appendLogEntry(msg);
       if (msg.player_id === myId) {
-        $('guess-text').disabled = true;
-        $('submit-guess-btn').disabled = true;
+        hide('guess-loading');
         show('advance-box');
         startAdvanceCountdown();
       }
@@ -286,6 +322,14 @@ function handleMessage(msg) {
     case 'error':
       log('!! ' + msg.message);
       alert(msg.message);
+      // If a guess got rejected (e.g. a rare race with the turn timer)
+      // after we'd already optimistically hidden the form, restore it so
+      // the player isn't stuck staring at a loading spinner forever.
+      if (roomState === 'Investigation' && currentDetectiveId === myId && !$('guess-loading').hidden) {
+        hide('guess-loading');
+        $('guess-text').value = '';
+        show('guess-text'); show('submit-guess-btn');
+      }
       break;
   }
 }
@@ -302,6 +346,12 @@ function renderMap(map, rooms, edges) {
     const links = neighborsOf(r.id).join(', ');
     return `<li><span class="room-name">${r.name}</span> <span class="room-links">— 연결: ${links}</span></li>`;
   }).join('');
+}
+
+function renderWeaponList() {
+  $('weapon-list').innerHTML = availableWeapons.map(w =>
+    `<li>${WEAPON_ICONS[w.id] || ''} ${w.name}</li>`
+  ).join('');
 }
 
 function renderWeaponPicker() {
@@ -408,6 +458,12 @@ $('submit-crime-btn').onclick = () => {
 $('submit-guess-btn').onclick = () => {
   const text = $('guess-text').value.trim();
   if (!text) return;
+  // Lock the form immediately rather than waiting for the server's
+  // guess_pending round trip - the server still enforces this
+  // authoritatively (a stale double-click can't corrupt whose turn it
+  // is), this is purely for a snappier, no-flicker loading state.
+  hide('guess-text'); hide('submit-guess-btn');
+  show('guess-loading');
   send({ type: 'submit_guess', text });
 };
 $('next-turn-btn').onclick = () => {

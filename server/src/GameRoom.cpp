@@ -90,6 +90,8 @@ void GameRoom::handle_disconnect(int player_id)
     if (player_id == criminal_id_ && round_in_progress) {
         sender_.broadcast({{"type", "error"}, {"message", "범인의 연결이 끊겨 라운드를 종료합니다."}});
         if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+        guess_in_flight_ = false;
+        turn_generation_++;
         pending_order_.clear();
         crime_eval_ = CrimeEvaluation{};
         solved_at_attempt_.clear();
@@ -104,6 +106,7 @@ void GameRoom::handle_disconnect(int player_id)
 
         if (was_current) {
             if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+            guess_in_flight_ = false;
             begin_next_turn();
             return;
         }
@@ -192,6 +195,7 @@ void GameRoom::handle_restart_game(int player_id)
     attempts_used_.clear();
     solved_at_attempt_.clear();
     current_detective_ = -1;
+    guess_in_flight_ = false;
     awaiting_advance_ = false;
 
     state_ = GameState::Lobby;
@@ -238,6 +242,7 @@ void GameRoom::start_round()
     attempts_used_.clear();
     solved_at_attempt_.clear();
     current_detective_ = -1;
+    guess_in_flight_ = false;
     awaiting_advance_ = false;
 
     state_ = GameState::CrimeWriting;
@@ -275,6 +280,18 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         send_error(player_id, "유효한 흉기를 선택하세요.");
         return;
     }
+    // The weapon picker is a separate UI control from the free-text
+    // narrative, so nothing else forces them to agree — without this
+    // check a criminal could pick "총" but write a narrative about
+    // bludgeoning someone with a candlestick, and the judge would then
+    // reasonably score guesses against what the *text* actually
+    // describes, silently disagreeing with the picked weapon. Requiring
+    // the picked weapon's name to appear in the text keeps both sources
+    // of truth consistent.
+    if (text.find(weapon) == std::string::npos) {
+        send_error(player_id, "범행 내용에 선택한 흉기(" + weapon + ")를 포함해 주세요.");
+        return;
+    }
     // Location isn't a separate field — the criminal only writes free
     // text (plus picks a weapon), and the location is extracted from that
     // text by matching it against the map's known room names.
@@ -309,6 +326,12 @@ void GameRoom::run_ai_judging()
                             {"evaluation", eval.evaluation},
                             {"key_facts", eval.key_facts}});
         crime_eval_ = std::move(eval);
+        // The score alone (not the reasoning or key_facts, which could
+        // hint at the answer) is revealed to everyone as soon as it's
+        // known, rather than waiting for round_result — both the
+        // criminal and the detectives use it to gauge the stakes before
+        // investigation starts.
+        sender_.broadcast({{"type", "crime_score_revealed"}, {"score", crime_eval_.score}});
         start_investigation();
     });
 }
@@ -332,6 +355,8 @@ void GameRoom::start_investigation()
 
 void GameRoom::begin_next_turn()
 {
+    turn_generation_++;
+
     if (pending_order_.empty()) {
         finish_round();
         return;
@@ -356,7 +381,7 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         send_error(player_id, "지금은 당신의 차례가 아닙니다.");
         return;
     }
-    if (awaiting_advance_) {
+    if (awaiting_advance_ || guess_in_flight_) {
         send_error(player_id, "이미 이번 차례에 제출했습니다.");
         return;
     }
@@ -366,8 +391,26 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
         return;
     }
 
+    // Set synchronously, before the async AI call starts — a second
+    // submit_guess arriving while this one is still in flight (e.g. a
+    // double-click before the client can disable its button) must be
+    // rejected by the check above, not allowed to start a second judging
+    // call for the same turn.
+    guess_in_flight_ = true;
+    sender_.send(player_id, {{"type", "guess_pending"}});
+    const int generation = turn_generation_;
+
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
-    judge_->judge(crime, text, [this, player_id, text, crime](GuessFeedback fb) {
+    judge_->judge(crime, text, [this, player_id, text, crime, generation](GuessFeedback fb) {
+        if (generation != turn_generation_) {
+            // The turn (or round) already moved on without this result —
+            // e.g. this detective disconnected while the AI was still
+            // thinking. Applying it now would touch state that belongs
+            // to a different turn/round, so just drop it.
+            return;
+        }
+
+        guess_in_flight_ = false;
         attempts_used_[player_id] = attempts_used_[player_id] + 1;
         pending_order_.pop_front();
 
