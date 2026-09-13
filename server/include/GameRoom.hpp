@@ -23,9 +23,10 @@ namespace mom {
 
 // Owns one game's worth of state and enforces the state machine from
 // docs/DESIGN.md section 5: only messages valid for the current state are
-// applied, everything else comes back as an "error" reply. Phase 1 runs a
-// single GameRoom directly inside GameServer; a RoomManager can wrap many
-// of these later (Phase 3) without GameRoom itself changing.
+// applied, everything else comes back as an "error" reply. GameRoom knows
+// nothing about there being other rooms — RoomManager (Phase 3) owns one
+// GameRoom per active room code and routes messages to the right one, so
+// nothing here changed to support that.
 //
 // The map (rooms + adjacency) and the weapon list are static board data
 // loaded from server/data/*.json (see GameData) — not per-round state, and
@@ -72,6 +73,11 @@ public:
     // the new session, so the joining player misses it — the caller must
     // send them a snapshot right after registering the session.
     void send_room_snapshot(int player_id);
+
+    // True if nobody who ever joined this room is still connected (or
+    // nobody ever joined at all). RoomManager uses this to know when a
+    // room can be torn down.
+    bool is_empty() const;
 
 private:
     void handle_start_game(int player_id);

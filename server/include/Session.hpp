@@ -34,6 +34,12 @@ public:
     std::optional<int> player_id() const { return player_id_; }
     void set_player_id(int id) { player_id_ = id; }
 
+    // Which room (by code) this session belongs to. Set together with
+    // player_id once create_room/join_room succeeds — before that, a
+    // session has neither.
+    std::optional<std::string> room_code() const { return room_code_; }
+    void set_room_code(std::string code) { room_code_ = std::move(code); }
+
 private:
     void on_accept(beast::error_code ec);
     void do_read();
@@ -45,6 +51,7 @@ private:
     beast::flat_buffer buffer_;
     GameServer& server_;
     std::optional<int> player_id_;
+    std::optional<std::string> room_code_;
     std::deque<std::string> write_queue_;
     bool writing_ = false;
 };

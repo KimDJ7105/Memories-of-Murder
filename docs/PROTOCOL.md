@@ -1,12 +1,13 @@
-# WebSocket 프로토콜 (Phase 1)
+# WebSocket 프로토콜
 
-모든 메시지는 JSON, `type` 필드로 구분한다. 서버는 `ws://localhost:9002` 하나에서 단일 게임방을 운영한다 (Phase 3에서 RoomManager 도입 전까지는 방이 하나뿐이다).
+모든 메시지는 JSON, `type` 필드로 구분한다. 서버는 `ws://localhost:9002` 하나에서 여러 방을 동시에 운영한다 (`RoomManager`, Phase 3) — 방은 4자리 방 코드로 구분되고, 코드를 아는 사람만 들어올 수 있다 (공개 목록 없음).
 
 ## Client → Server
 
 | type | 필드 | 설명 |
 |---|---|---|
-| `join` | `name` | 최초 접속 시 반드시 먼저 보내야 함. Lobby 상태에서만 허용, 성공 시 `joined` 응답 |
+| `create_room` | `name` | 최초 접속 시 `join_room` 대신 보낼 수 있음. 새 방을 만들고 그 방의 방장이 된다. 항상 성공하며, 성공 시 `room_created` 응답으로 방 코드를 받는다 |
+| `join_room` | `room_code`, `name` | 최초 접속 시 `create_room` 대신 보낼 수 있음. 해당 코드의 방이 존재하고 아직 Lobby 상태(게임 시작 전)이며 인원(최대 6명)이 차지 않았어야 함. 성공 시 `joined` 응답, 실패 시 `error` |
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
 | `restart_game` | - | 방장만 가능, `GameOver` 상태에서만 허용. 같은 방·같은 플레이어로 점수/범인 이력을 초기화하고 Lobby로 되돌린다 (연결이 끊긴 플레이어는 이때 제거됨). 이후 다시 `start_game`을 보내면 새 게임이 시작된다 |
 | `submit_crime` | `text` | 범인만, `CrimeWriting` 상태에서만 허용. 장소·흉기 모두 별도 필드가 아니라 `text` 안에 지도의 방 이름 / 흉기 목록의 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 둘 다 찾아낸다 (`GameData::extract_room_mention`/`extract_weapon_mention`). 범인은 UI에서 클릭으로 고르는 것이 하나도 없다 |
@@ -18,7 +19,8 @@
 
 | type | 필드 | 설명 |
 |---|---|---|
-| `joined` | `player_id` | join 성공 응답 |
+| `room_created` | `room_code`, `player_id` | `create_room` 성공 응답. 이 방 코드를 다른 플레이어에게 알려줘야 같이 플레이할 수 있다 |
+| `joined` | `room_code`, `player_id` | `join_room` 성공 응답 |
 | `board_info` | `map{id,name,image}`, `rooms[{id,name}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 게임 시작 시 1회만 전송되는 정적 데이터. 지도(방+연결 관계)와 흉기 후보 — 라운드마다 반복되지 않음. `image`는 지금은 항상 null(추후 배경 이미지 지원용) |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
@@ -30,6 +32,14 @@
 | `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
+
+## 여러 방 운영 (RoomManager)
+
+`RoomManager`가 방 코드(4자리 숫자, 예: `3821`)를 키로 `GameRoom` 인스턴스를 여러 개 관리한다. 방마다 완전히 독립적인 상태(플레이어, 라운드, 점수 등)를 가지며, 한 방의 브로드캐스트가 다른 방 플레이어에게 새는 일은 없다 — 각 방은 자기 세션 목록만 아는 전용 `MessageSender`(`RoomSender`)를 통해서만 메시지를 보낸다.
+
+접속한 세션은 `create_room` 또는 `join_room`을 보내기 전까지는 어느 방에도 속하지 않은 상태다. 둘 중 하나가 성공하면 세션에 방 코드와 플레이어 id가 함께 부여되고, 그 뒤로 오는 모든 메시지는 해당 방의 `GameRoom`으로 그대로 전달된다. `GameRoom` 자체는 다른 방이 존재한다는 사실을 전혀 모른다 — 방을 여러 개 다루는 책임은 전부 `RoomManager`에 있다.
+
+방은 공개 목록이 없다 — 코드를 아는 사람만 들어올 수 있다. 방에 연결된 플레이어가 한 명도 안 남으면(전원 접속 종료) 그 방은 자동으로 정리된다.
 
 ## 상태 흐름
 

@@ -14,6 +14,7 @@ add_executable(game_server
     src/OllamaClient.cpp
     src/OllamaCrimeEvaluator.cpp
     src/OllamaGuessJudge.cpp
+    src/RoomManager.cpp
 )
 
 target_include_directories(game_server PRIVATE include)

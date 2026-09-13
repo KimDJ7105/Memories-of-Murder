@@ -95,6 +95,11 @@
   #map-wrap .room-links { color: var(--ink-faded); }
   #weapon-list-wrap ul { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
+  #room-code-display {
+    font-size: 1.3em; font-weight: bold; text-align: center; letter-spacing: 4px;
+    padding: 10px; border: 2px dashed var(--rule); background: rgba(216,179,74,0.15);
+  }
+
   #score-preview {
     font-weight: bold; text-align: center; padding: 8px; margin-bottom: 12px;
     border: 2px dashed var(--rule); background: rgba(216,179,74,0.15);
@@ -128,11 +133,20 @@
 <section id="join-screen">
   <h2>입장</h2>
   <input id="name-input" type="text" placeholder="닉네임">
-  <button id="join-btn">입장하기</button>
+  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+    <div>
+      <button id="create-room-btn">새 방 만들기</button>
+    </div>
+    <div>
+      <input id="room-code-input" type="text" placeholder="방 코드 (4자리)" maxlength="4" style="width:120px; display:inline-block;">
+      <button id="join-room-btn">방 코드로 입장</button>
+    </div>
+  </div>
 </section>
 
 <section id="lobby-screen" hidden>
   <h2>대기실</h2>
+  <p id="room-code-display"></p>
   <ul id="players"></ul>
   <button id="start-btn" hidden>게임 시작 (3~6명 필요)</button>
   <p id="lobby-hint"></p>
@@ -229,8 +243,10 @@ function send(msg) { ws.send(JSON.stringify(msg)); }
 function handleMessage(msg) {
   log('<- ' + JSON.stringify(msg));
   switch (msg.type) {
+    case 'room_created':
     case 'joined':
       myId = msg.player_id;
+      $('room-code-display').textContent = `방 코드: ${msg.room_code}`;
       show('lobby-screen');
       hide('join-screen');
       break;
@@ -447,10 +463,16 @@ function renderGameOver(msg) {
 function show(id) { $(id).hidden = false; }
 function hide(id) { $(id).hidden = true; }
 
-$('join-btn').onclick = () => {
+$('create-room-btn').onclick = () => {
   const name = $('name-input').value.trim();
   if (!name) return;
-  send({ type: 'join', name });
+  send({ type: 'create_room', name });
+};
+$('join-room-btn').onclick = () => {
+  const name = $('name-input').value.trim();
+  const roomCode = $('room-code-input').value.trim();
+  if (!name || !roomCode) return;
+  send({ type: 'join_room', room_code: roomCode, name });
 };
 $('start-btn').onclick = () => send({ type: 'start_game' });
 $('restart-btn').onclick = () => send({ type: 'restart_game' });

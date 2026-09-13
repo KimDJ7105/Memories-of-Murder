@@ -580,4 +580,9 @@ void GameRoom::send_room_snapshot(int player_id)
     sender_.send(player_id, build_room_update());
 }
 
+bool GameRoom::is_empty() const
+{
+    return std::none_of(players_.begin(), players_.end(), [](const Player& p) { return p.connected; });
+}
+
 }

@@ -58,7 +58,9 @@ void warm_up_ollama(boost::asio::io_context& ioc, const AiConfig& cfg)
 
 GameServer::GameServer(boost::asio::io_context& ioc)
     : game_data_(GameData::load_default())
-    , room_(ioc, game_data_, *this, make_evaluator(ioc), make_judge(ioc))
+    , room_manager_(ioc, game_data_,
+                    [this](boost::asio::io_context& ioc) { return make_evaluator(ioc); },
+                    [this](boost::asio::io_context& ioc) { return make_judge(ioc); })
 {
     const AiConfig cfg = resolve_ai_config();
     if (cfg.backend != "mock") warm_up_ollama(ioc, cfg);
@@ -88,48 +90,59 @@ void GameServer::on_message(const std::shared_ptr<Session>& session, const std::
         return;
     }
 
-    if (!session->player_id()) {
-        if (msg.value("type", "") != "join") {
-            session->send({{"type", "error"}, {"message", "join 메시지가 필요합니다."}});
-            return;
+    if (!session->room_code()) {
+        const std::string type = msg.value("type", "");
+        if (type == "create_room") {
+            handle_create_room(session, msg);
+        } else if (type == "join_room") {
+            handle_join_room(session, msg);
+        } else {
+            session->send({{"type", "error"}, {"message", "create_room 또는 join_room 메시지가 필요합니다."}});
         }
-        const std::string name = msg.value("name", "");
-        const int id = room_.handle_join(name);
-        if (id == -1) {
-            session->send({{"type", "error"}, {"message", "입장할 수 없습니다 (게임 진행 중이거나 인원이 가득 찼습니다)."}});
-            session->close();
-            return;
-        }
-        session->set_player_id(id);
-        sessions_[id] = session;
-        session->send({{"type", "joined"}, {"player_id", id}});
-        // handle_join already broadcast a room_update, but that happened
-        // before this session was registered above, so this player missed
-        // it — send them a snapshot directly now that they're registered.
-        room_.send_room_snapshot(id);
         return;
     }
 
-    room_.handle_message(*session->player_id(), msg);
+    room_manager_.handle_message(*session->room_code(), *session->player_id(), msg);
+}
+
+void GameServer::handle_create_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg)
+{
+    const std::string name = msg.value("name", "");
+    const auto [room_code, player_id] = room_manager_.create_room(session, name);
+
+    session->set_room_code(room_code);
+    session->set_player_id(player_id);
+    session->send({{"type", "room_created"}, {"room_code", room_code}, {"player_id", player_id}});
+    // create_room already broadcast a room_update inside GameRoom, but
+    // that happened before this session was registered above, so this
+    // player (the only one in the room so far) missed it.
+    room_manager_.send_room_snapshot(room_code, player_id);
+}
+
+void GameServer::handle_join_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg)
+{
+    const std::string room_code = msg.value("room_code", "");
+    const std::string name = msg.value("name", "");
+
+    const int player_id = room_manager_.join_room(room_code, session, name);
+    if (player_id == -1) {
+        session->send({{"type", "error"}, {"message", "방을 찾을 수 없거나 입장할 수 없습니다 (게임 진행 중이거나 인원이 가득 찼습니다)."}});
+        return;
+    }
+
+    session->set_room_code(room_code);
+    session->set_player_id(player_id);
+    session->send({{"type", "joined"}, {"room_code", room_code}, {"player_id", player_id}});
+    // Same reasoning as handle_create_room: this player's own session
+    // wasn't registered yet when GameRoom broadcast its own room_update.
+    room_manager_.send_room_snapshot(room_code, player_id);
 }
 
 void GameServer::on_disconnect(const std::shared_ptr<Session>& session)
 {
-    if (auto id = session->player_id()) {
-        sessions_.erase(*id);
-        room_.handle_disconnect(*id);
+    if (session->room_code() && session->player_id()) {
+        room_manager_.handle_disconnect(*session->room_code(), *session->player_id());
     }
-}
-
-void GameServer::send(int player_id, const nlohmann::json& msg)
-{
-    auto it = sessions_.find(player_id);
-    if (it != sessions_.end()) it->second->send(msg);
-}
-
-void GameServer::broadcast(const nlohmann::json& msg)
-{
-    for (auto& [id, session] : sessions_) session->send(msg);
 }
 
 }
