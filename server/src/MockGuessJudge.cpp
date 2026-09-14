@@ -47,6 +47,7 @@ std::string verdict_from_ratio(double ratio)
 
 void MockGuessJudge::judge(
     const Crime& crime,
+    const MapDef&,
     const std::string& guess_text,
     std::function<void(GuessFeedback)> on_done)
 {

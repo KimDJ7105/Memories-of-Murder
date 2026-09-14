@@ -25,6 +25,7 @@ public:
                      std::string port);
 
     void judge(const Crime& crime,
+               const MapDef& map,
                const std::string& guess_text,
                std::function<void(GuessFeedback)> on_done) override;
 

@@ -4,7 +4,7 @@
 
 namespace mom {
 
-void MockCrimeEvaluator::evaluate(const Crime& crime, std::function<void(CrimeEvaluation)> on_done)
+void MockCrimeEvaluator::evaluate(const Crime& crime, const MapDef&, std::function<void(CrimeEvaluation)> on_done)
 {
     // Placeholder scoring only: rewards a longer, more detailed confession
     // and mentioning the assigned location/weapon. No real judgement of

@@ -11,7 +11,9 @@ namespace mom {
 
 // Real AI-backed evaluator: sends the crime to a local Ollama model over
 // HTTP (OllamaClient) instead of MockCrimeEvaluator's keyword heuristic.
-// The map and weapon list (GameData) are baked into the system prompt so
+// The room's currently-selected map (passed in per call — a room can
+// change its map via select_map after this evaluator already exists) and
+// the shared weapon list (GameData) are baked into the system prompt so
 // the model can judge things like "does this weapon exist" and "is this
 // movement plausible given room adjacency" (docs/DESIGN.md section 7)
 // rather than evaluating the text in a vacuum.
@@ -28,7 +30,7 @@ public:
                          std::string host,
                          std::string port);
 
-    void evaluate(const Crime& crime, std::function<void(CrimeEvaluation)> on_done) override;
+    void evaluate(const Crime& crime, const MapDef& map, std::function<void(CrimeEvaluation)> on_done) override;
 
 private:
     boost::asio::io_context& ioc_;

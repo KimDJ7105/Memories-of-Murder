@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Crime.hpp"
+#include "GameData.hpp"
 
 namespace mom {
 
@@ -27,11 +28,15 @@ struct GuessFeedback {
 // batched simultaneous guesses), so this trades the original "one AI call
 // per attempt round" batching for "one call per guess" — a deliberate
 // tradeoff for immediate per-turn feedback.
+// `map` is whichever MapDef the room currently has selected — see
+// CrimeEvaluator.hpp for why it's passed per call instead of fixed at
+// construction.
 class IGuessJudge {
 public:
     virtual ~IGuessJudge() = default;
     virtual void judge(
         const Crime& crime,
+        const MapDef& map,
         const std::string& guess_text,
         std::function<void(GuessFeedback)> on_done) = 0;
 };
@@ -44,6 +49,7 @@ class MockGuessJudge : public IGuessJudge {
 public:
     void judge(
         const Crime& crime,
+        const MapDef& map,
         const std::string& guess_text,
         std::function<void(GuessFeedback)> on_done) override;
 };

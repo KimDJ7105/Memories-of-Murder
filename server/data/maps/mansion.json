@@ -1,7 +1,7 @@
 {
   "id": "mansion",
   "name": "낡은 저택",
-  "image": null,
+  "image": "mansion.svg",
   "rooms": [
     {"id": "attic", "name": "다락방"},
     {"id": "library", "name": "서재"},

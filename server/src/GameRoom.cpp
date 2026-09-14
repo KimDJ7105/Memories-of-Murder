@@ -35,6 +35,7 @@ GameRoom::GameRoom(boost::asio::io_context& ioc,
     , judge_(std::move(judge))
     , rng_(std::random_device{}())
     , turn_timer_(ioc)
+    , selected_map_(&data.default_map())
 {
 }
 
@@ -128,6 +129,8 @@ void GameRoom::handle_message(int player_id, const nlohmann::json& msg)
         handle_start_game(player_id);
     } else if (type == "restart_game") {
         handle_restart_game(player_id);
+    } else if (type == "select_map") {
+        handle_select_map(player_id, msg);
     } else if (type == "submit_crime") {
         handle_submit_crime(player_id, msg);
     } else if (type == "submit_guess") {
@@ -164,6 +167,27 @@ void GameRoom::handle_start_game(int player_id)
     round_number_ = 0;
     broadcast_board_info();
     start_round();
+}
+
+void GameRoom::handle_select_map(int player_id, const nlohmann::json& msg)
+{
+    if (state_ != GameState::Lobby) {
+        send_error(player_id, "게임이 시작되기 전에만 지도를 바꿀 수 있습니다.");
+        return;
+    }
+    if (player_id != host_id_) {
+        send_error(player_id, "방장만 지도를 바꿀 수 있습니다.");
+        return;
+    }
+    const std::string map_id = msg.value("map_id", "");
+    const MapDef* map = data_.find_map(map_id);
+    if (!map) {
+        send_error(player_id, "존재하지 않는 지도입니다.");
+        return;
+    }
+
+    selected_map_ = map;
+    broadcast_board_info();
 }
 
 void GameRoom::handle_restart_game(int player_id)
@@ -207,25 +231,42 @@ void GameRoom::handle_restart_game(int player_id)
     broadcast_room_update();
 }
 
-void GameRoom::broadcast_board_info()
+nlohmann::json GameRoom::build_board_info() const
 {
-    // Static for the whole game: the map (rooms + adjacency) and the
-    // weapon list never change per round, so this is sent once rather
-    // than repeated in every round_start.
+    const MapDef& map = *selected_map_;
+
     nlohmann::json rooms = nlohmann::json::array();
-    for (const auto& r : data_.map.rooms) {
-        rooms.push_back({{"id", r.id}, {"name", r.name}});
-    }
+    for (const auto& r : map.rooms) rooms.push_back({{"id", r.id}, {"name", r.name}});
+
     nlohmann::json edges = nlohmann::json::array();
-    for (const auto& [a, b] : data_.map.edges) edges.push_back({a, b});
+    for (const auto& [a, b] : map.edges) edges.push_back({a, b});
+
     nlohmann::json weapons = nlohmann::json::array();
     for (const auto& w : data_.weapons) weapons.push_back({{"id", w.id}, {"name", w.name}});
 
-    sender_.broadcast({{"type", "board_info"},
-               {"map", {{"id", data_.map.id}, {"name", data_.map.name}, {"image", data_.map.image ? nlohmann::json(*data_.map.image) : nlohmann::json(nullptr)}}},
-               {"rooms", rooms},
-               {"edges", edges},
-               {"weapons", weapons}});
+    nlohmann::json available_maps = nlohmann::json::array();
+    for (const auto& m : data_.maps) available_maps.push_back({{"id", m.id}, {"name", m.name}});
+
+    return {{"type", "board_info"},
+            {"available_maps", available_maps},
+            {"map", {{"id", map.id}, {"name", map.name}, {"image", map.image ? nlohmann::json(*map.image) : nlohmann::json(nullptr)}}},
+            {"rooms", rooms},
+            {"edges", edges},
+            {"weapons", weapons}};
+}
+
+void GameRoom::broadcast_board_info()
+{
+    // The map (rooms + adjacency + image) and the weapon list only change
+    // when the host picks a different map in Lobby (select_map) — this
+    // gets called on every such change, plus once at start_game as a
+    // final sync.
+    sender_.broadcast(build_board_info());
+}
+
+void GameRoom::send_board_info(int player_id)
+{
+    sender_.send(player_id, build_board_info());
 }
 
 void GameRoom::start_round()
@@ -294,7 +335,7 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         send_error(player_id, "범행 내용에 사용 가능한 흉기 이름을 포함해 주세요.");
         return;
     }
-    const RoomDef* room = data_.extract_room_mention(text);
+    const RoomDef* room = data_.extract_room_mention(*selected_map_, text);
     if (!room) {
         send_error(player_id, "범행 내용에 지도에 있는 구체적인 장소를 포함해 주세요.");
         return;
@@ -314,7 +355,7 @@ void GameRoom::run_ai_judging()
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
     const int round = round_number_;
     const int criminal_id = criminal_id_;
-    evaluator_->evaluate(crime, [this, crime, round, criminal_id](CrimeEvaluation eval) {
+    evaluator_->evaluate(crime, *selected_map_, [this, crime, round, criminal_id](CrimeEvaluation eval) {
         log_ai_test_event({{"type", "crime_evaluation"},
                             {"round", round},
                             {"criminal_id", criminal_id},
@@ -400,7 +441,7 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
     const int generation = turn_generation_;
 
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
-    judge_->judge(crime, text, [this, player_id, text, crime, generation](GuessFeedback fb) {
+    judge_->judge(crime, *selected_map_, text, [this, player_id, text, crime, generation](GuessFeedback fb) {
         if (generation != turn_generation_) {
             // The turn (or round) already moved on without this result —
             // e.g. this detective disconnected while the AI was still
@@ -578,6 +619,7 @@ void GameRoom::broadcast_room_update()
 void GameRoom::send_room_snapshot(int player_id)
 {
     sender_.send(player_id, build_room_update());
+    send_board_info(player_id);
 }
 
 bool GameRoom::is_empty() const

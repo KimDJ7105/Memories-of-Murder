@@ -8,6 +8,7 @@
 |---|---|---|
 | `create_room` | `name` | 최초 접속 시 `join_room` 대신 보낼 수 있음. 새 방을 만들고 그 방의 방장이 된다. 항상 성공하며, 성공 시 `room_created` 응답으로 방 코드를 받는다 |
 | `join_room` | `room_code`, `name` | 최초 접속 시 `create_room` 대신 보낼 수 있음. 해당 코드의 방이 존재하고 아직 Lobby 상태(게임 시작 전)이며 인원(최대 6명)이 차지 않았어야 함. 성공 시 `joined` 응답, 실패 시 `error` |
+| `select_map` | `map_id` | 방장만 가능, Lobby에서만 허용. 이 방에서 플레이할 지도를 바꾼다 (기본값은 `GameData::default_map()`, 지금은 "mansion"). 성공 시 전원에게 새 `board_info`가 브로드캐스트됨 |
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
 | `restart_game` | - | 방장만 가능, `GameOver` 상태에서만 허용. 같은 방·같은 플레이어로 점수/범인 이력을 초기화하고 Lobby로 되돌린다 (연결이 끊긴 플레이어는 이때 제거됨). 이후 다시 `start_game`을 보내면 새 게임이 시작된다 |
 | `submit_crime` | `text` | 범인만, `CrimeWriting` 상태에서만 허용. 장소·흉기 모두 별도 필드가 아니라 `text` 안에 지도의 방 이름 / 흉기 목록의 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 둘 다 찾아낸다 (`GameData::extract_room_mention`/`extract_weapon_mention`). 범인은 UI에서 클릭으로 고르는 것이 하나도 없다 |
@@ -21,7 +22,7 @@
 |---|---|---|
 | `room_created` | `room_code`, `player_id` | `create_room` 성공 응답. 이 방 코드를 다른 플레이어에게 알려줘야 같이 플레이할 수 있다 |
 | `joined` | `room_code`, `player_id` | `join_room` 성공 응답 |
-| `board_info` | `map{id,name,image}`, `rooms[{id,name}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 게임 시작 시 1회만 전송되는 정적 데이터. 지도(방+연결 관계)와 흉기 후보 — 라운드마다 반복되지 않음. `image`는 지금은 항상 null(추후 배경 이미지 지원용) |
+| `board_info` | `available_maps[{id,name}]`, `map{id,name,image}`, `rooms[{id,name}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
@@ -63,17 +64,31 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
 
 ## 지도와 흉기는 정적 데이터, 서버가 고르지 않는다
 
-장소와 흉기 둘 다 서버가 라운드마다 무작위로 배정하지 않는다. `board_info`로 전달되는 지도(방 목록 + 인접 관계)와 흉기 목록은 게임 내내 변하지 않는 보드 상태다. 범인은 장소든 흉기든 UI로 고르는 게 하나도 없다 — 범행을 자연어로 쓸 때 지도에 있는 방 이름과 흉기 목록의 이름을 문장에 자연스럽게 포함하면, 서버가 그 문장에서 둘 다 찾아낸다(`GameData::extract_room_mention`/`extract_weapon_mention`, 문장에서 가장 먼저 등장하는 이름을 채택). 둘 중 하나라도 언급되지 않은 범행은 `error`로 거부된다. 그래서 장소·무기 모두 `round_result`가 오기 전까지는 비공개다.
+장소와 흉기 둘 다 서버가 라운드마다 무작위로 배정하지 않는다. `board_info`로 전달되는 지도(방 목록 + 인접 관계)와 흉기 목록은 라운드 사이에는 변하지 않는 보드 상태다(방장이 Lobby에서 `select_map`으로 지도 자체를 바꾸는 것과는 별개). 범인은 장소든 흉기든 UI로 고르는 게 하나도 없다 — 범행을 자연어로 쓸 때 지도에 있는 방 이름과 흉기 목록의 이름을 문장에 자연스럽게 포함하면, 서버가 그 문장에서 둘 다 찾아낸다(`GameData::extract_room_mention`/`extract_weapon_mention`, 문장에서 가장 먼저 등장하는 이름을 채택). 둘 중 하나라도 언급되지 않은 범행은 `error`로 거부된다. 그래서 장소·무기 모두 `round_result`가 오기 전까지는 비공개다.
 
 (한때는 흉기만 클릭으로 고르는 선택지를 따로 뒀었는데, 문장에 그 흉기를 실제로 언급하지 않아도 통과되는 바람에 "선택한 흉기"와 "실제 서술 내용"이 어긋나는 문제가 있었다. 장소와 완전히 같은 방식으로 텍스트에서 추출하도록 통일해 이 불일치 자체를 없앴다.)
 
 방 인접 관계(`edges`)는 지금은 클라이언트 지도 렌더링에만 쓰이지만, 서버 쪽에도 데이터로 보존해 둔 이유는 향후 AI 평가(`docs/DESIGN.md` 섹션 7의 "이동 및 실행 가능성")가 "그 방에서 저 방으로 이동하는 게 말이 되는가"를 판단할 때 쓸 수 있게 하기 위함이다. Phase 1의 Mock 평가기는 아직 이 데이터를 실제로 사용하지 않는다.
 
-## 지도/흉기는 코드가 아니라 파일
+## 지도는 코드가 아니라 파일 (여러 개 가능)
 
-`server/data/maps/mansion.json`과 `server/data/weapons.json`이 실제 정의다 (`server/include/GameData.hpp`가 로딩). 새 지도를 추가하고 싶으면 같은 스키마로 JSON 파일을 하나 더 만들면 된다.
+`server/data/maps/` 아래의 `*.json` 파일 하나하나가 지도 하나다 — `GameData::load_default()`가 그 디렉터리를 스캔해서 있는 대로 전부 로드한다. 새 지도를 추가하고 싶으면 같은 스키마로 JSON 파일을 하나 더 넣기만 하면 되고, 코드를 고칠 필요는 없다. `server/data/weapons.json`은 지도와 무관하게 전체 게임에서 공유되는 흉기 목록이다.
 
-지도 데이터는 순수하게 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다. 클라이언트는 지금 이 데이터를 방 이름 + 인접한 방 목록으로 된 텍스트 목록으로만 보여준다. `image` 필드는 나중에 실제 배경 이미지를 붙이게 될 때를 위해 남겨둔 자리이며, 그때 가서 이미지 위에 방 영역을 표시(클릭/강조 등)해야 하는 구체적인 기능이 생기면 그때 좌표를 추가하면 된다 — 지금은 그런 기능이 없어서 좌표를 미리 넣지 않았다.
+각 지도 JSON의 스키마:
+
+```json
+{
+  "id": "mansion",
+  "name": "낡은 저택",
+  "image": "mansion.svg",
+  "rooms": [{"id": "attic", "name": "다락방"}, ...],
+  "edges": [["attic", "library"], ...]
+}
+```
+
+지도 데이터 자체는 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다 (좌표를 넣었다가 아무 기능도 쓰지 않길래 도로 뺀 적이 있다 — git log 참고). `image`는 지도와 같은 폴더에 있는 이미지 파일 이름(`mansion.svg`처럼)을 가리키고, `GameData`가 서버 시작 시 그 파일을 딱 한 번 읽어서 base64 `data:` URI로 인코딩해 메모리에 들고 있는다 — 매 요청마다 다시 읽거나 인코딩하지 않고, `board_info`를 보낼 때 이미 완성된 문자열을 그대로 끼워 넣기만 한다. 이 방식 덕분에 이미지 하나 보여주자고 별도의 HTTP 정적 파일 서버를 둘 필요가 없다 (지금 서버는 WebSocket 하나뿐이다). 확장자로 MIME 타입을 판단하므로(`.svg`→`image/svg+xml`, `.png`→`image/png` 등) 나중에 실제 손그림/AI 생성 PNG로 바꾸고 싶으면 그 확장자의 파일로 교체하고 JSON의 `image` 값만 바꾸면 된다 — 코드 변경 없음.
+
+`GameRoom`은 방마다 `selected_map_`(기본값은 `GameData::default_map()`, 지금은 "mansion")을 들고 있고, 호스트가 Lobby에서 `select_map`을 보내면 그때그때 바뀐다. `ICrimeEvaluator`/`IGuessJudge`는 방 생성 시 한 번만 만들어지므로(지도 선택보다 먼저 존재), 어떤 지도를 쓸지는 생성자가 아니라 `evaluate`/`judge` 호출마다 인자로 넘겨받는다.
 
 ## AI 백엔드 (Phase 2)
 

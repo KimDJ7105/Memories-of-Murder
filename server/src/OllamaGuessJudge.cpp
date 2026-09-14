@@ -13,10 +13,10 @@ namespace {
 
 const std::set<std::string> kValidVerdicts = {"일치", "유사", "불일치"};
 
-std::string build_system_prompt(const GameData& data)
+std::string build_system_prompt(const GameData& data, const MapDef& map)
 {
     std::ostringstream rooms;
-    for (const auto& r : data.map.rooms) rooms << "- " << r.name << "\n";
+    for (const auto& r : map.rooms) rooms << "- " << r.name << "\n";
     std::ostringstream weapons;
     for (const auto& w : data.weapons) weapons << "- " << w.name << "\n";
 
@@ -124,11 +124,12 @@ OllamaGuessJudge::OllamaGuessJudge(boost::asio::io_context& ioc,
 }
 
 void OllamaGuessJudge::judge(const Crime& crime,
+                             const MapDef& map,
                              const std::string& guess_text,
                              std::function<void(GuessFeedback)> on_done)
 {
     auto client = std::make_shared<OllamaClient>(ioc_, host_, port_);
-    client->chat_json(model_, build_system_prompt(data_), build_user_prompt(crime, guess_text),
+    client->chat_json(model_, build_system_prompt(data_, map), build_user_prompt(crime, guess_text),
         [on_done = std::move(on_done)](bool ok, std::string content) mutable {
             on_done(parse_feedback(ok, content));
         });

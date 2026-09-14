@@ -94,6 +94,8 @@
   #map-wrap .room-name { font-weight: bold; }
   #map-wrap .room-links { color: var(--ink-faded); }
   #weapon-list-wrap ul { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  #map-image { display: block; max-width: 100%; margin: 8px 0; border: 1px solid var(--rule); }
+  #map-picker-wrap { margin: 10px 0; }
 
   #room-code-display {
     font-size: 1.3em; font-weight: bold; text-align: center; letter-spacing: 4px;
@@ -148,6 +150,13 @@
   <h2>대기실</h2>
   <p id="room-code-display"></p>
   <ul id="players"></ul>
+
+  <div id="map-picker-wrap">
+    <label for="map-picker">지도: </label>
+    <select id="map-picker"></select>
+    <span id="map-picker-readonly" hidden></span>
+  </div>
+
   <button id="start-btn" hidden>게임 시작 (3~6명 필요)</button>
   <p id="lobby-hint"></p>
 </section>
@@ -157,6 +166,7 @@
 
   <div id="map-wrap">
     <p class="map-name" id="map-name"></p>
+    <img id="map-image" hidden alt="지도 이미지">
     <ul id="map-rooms"></ul>
   </div>
 
@@ -225,6 +235,8 @@ let myRole = null;
 let players = [];
 let roomState = 'Lobby';
 let availableWeapons = [];
+let availableMaps = [];
+let currentMapId = null;
 let currentDetectiveId = null;
 let advanceCountdownTimer = null;
 let nextRoundCountdownTimer = null;
@@ -258,8 +270,11 @@ function handleMessage(msg) {
       break;
     case 'board_info':
       availableWeapons = msg.weapons;
+      availableMaps = msg.available_maps;
+      currentMapId = msg.map.id;
       renderMap(msg.map, msg.rooms, msg.edges);
       renderWeaponList();
+      renderMapPicker();
       break;
     case 'round_start':
       show('round-screen'); hide('lobby-screen'); hide('result-screen');
@@ -353,6 +368,13 @@ function handleMessage(msg) {
 function renderMap(map, rooms, edges) {
   $('map-name').textContent = `지도: ${map.name} — 범인은 아래 방 중 한 곳을 글 속에 자연스럽게 써서 묘사합니다.`;
 
+  if (map.image) {
+    $('map-image').src = map.image;
+    show('map-image');
+  } else {
+    hide('map-image');
+  }
+
   const neighborsOf = (id) => edges
     .filter(([a, b]) => a === id || b === id)
     .map(([a, b]) => (a === id ? b : a))
@@ -362,6 +384,20 @@ function renderMap(map, rooms, edges) {
     const links = neighborsOf(r.id).join(', ');
     return `<li><span class="room-name">${r.name}</span> <span class="room-links">— 연결: ${links}</span></li>`;
   }).join('');
+}
+
+function renderMapPicker() {
+  if (!availableMaps.length) return;
+  const isHost = players.find(p => p.id === myId)?.is_host;
+  if (isHost) {
+    $('map-picker').innerHTML = availableMaps.map(m =>
+      `<option value="${m.id}" ${m.id === currentMapId ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+    show('map-picker'); hide('map-picker-readonly');
+  } else {
+    $('map-picker-readonly').textContent = availableMaps.find(m => m.id === currentMapId)?.name ?? currentMapId;
+    hide('map-picker'); show('map-picker-readonly');
+  }
 }
 
 function renderWeaponList() {
@@ -386,6 +422,7 @@ function renderPlayers() {
   $('start-btn').hidden = !(roomState === 'Lobby' && isHost);
   $('lobby-hint').textContent = players.length < 3 ? `${3 - players.length}명 더 필요합니다.` :
                                  players.length > 6 ? '최대 6명까지 가능합니다.' : '시작할 준비가 되었습니다.';
+  renderMapPicker();
 }
 
 function appendLogEntry(msg) {
@@ -475,6 +512,7 @@ $('join-room-btn').onclick = () => {
   send({ type: 'join_room', room_code: roomCode, name });
 };
 $('start-btn').onclick = () => send({ type: 'start_game' });
+$('map-picker').onchange = () => send({ type: 'select_map', map_id: $('map-picker').value });
 $('restart-btn').onclick = () => send({ type: 'restart_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();

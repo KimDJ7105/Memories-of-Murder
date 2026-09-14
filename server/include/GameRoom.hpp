@@ -28,17 +28,20 @@ namespace mom {
 // GameRoom per active room code and routes messages to the right one, so
 // nothing here changed to support that.
 //
-// The map (rooms + adjacency) and the weapon list are static board data
-// loaded from server/data/*.json (see GameData) — not per-round state, and
-// never picked by the server. The criminal writes the crime entirely as
-// free text, with no location or weapon UI selection at all; both are
-// extracted from that text by matching it against the map's room names /
-// the weapon list (GameData::extract_room_mention /
-// extract_weapon_mention — placeholders for real AI extraction in a
-// later phase). Both stay secret, like the confession text itself, until
-// `round_result` reveals them. Room adjacency exists for future
-// evaluators to judge movement plausibility (docs/DESIGN.md section 7's
-// "이동 및 실행 가능성"); Phase 1's mock evaluator doesn't use it yet.
+// Every available map (rooms + adjacency + optional image) and the shared
+// weapon list are static board data loaded from server/data/*.json (see
+// GameData) — never picked by the server itself. A room starts on
+// GameData::default_map() and the host can switch it via `select_map`
+// any time before start_game. Whichever map is selected, the criminal
+// writes the crime entirely as free text, with no location or weapon UI
+// selection at all; both are extracted from that text by matching it
+// against the selected map's room names / the weapon list
+// (GameData::extract_room_mention / extract_weapon_mention — placeholders
+// for real AI extraction in a later phase). Both stay secret, like the
+// confession text itself, until `round_result` reveals them. Room
+// adjacency exists for future evaluators to judge movement plausibility
+// (docs/DESIGN.md section 7's "이동 및 실행 가능성"); the mock evaluator
+// doesn't use it yet.
 //
 // Investigation is turn-based: detectives take one guess at a time in a
 // rotating queue (`pending_order_`), each guess gets immediate public
@@ -68,10 +71,12 @@ public:
     // joined (i.e. have a player id).
     void handle_message(int player_id, const nlohmann::json& msg);
 
-    // Sends the current room_update to just this one player. handle_join's
-    // own broadcast_room_update() fires before GameServer has registered
-    // the new session, so the joining player misses it — the caller must
-    // send them a snapshot right after registering the session.
+    // Sends the current room_update and board_info to just this one
+    // player. handle_join's own broadcast_room_update() fires before
+    // GameServer has registered the new session, so the joining player
+    // misses it — the caller must send them a snapshot right after
+    // registering the session. board_info rides along so a player joining
+    // an already-selected (non-default) map sees it immediately too.
     void send_room_snapshot(int player_id);
 
     // True if nobody who ever joined this room is still connected (or
@@ -82,12 +87,15 @@ public:
 private:
     void handle_start_game(int player_id);
     void handle_restart_game(int player_id);
+    void handle_select_map(int player_id, const nlohmann::json& msg);
     void handle_submit_crime(int player_id, const nlohmann::json& msg);
     void handle_submit_guess(int player_id, const nlohmann::json& msg);
     void handle_next_turn(int player_id);
     void handle_next_round(int player_id);
 
+    nlohmann::json build_board_info() const;
     void broadcast_board_info();
+    void send_board_info(int player_id);
     void start_round();
     void run_ai_judging();
     void start_investigation();
@@ -114,6 +122,11 @@ private:
     std::vector<Player> players_;
     int next_player_id_ = 1;
     int host_id_ = -1;
+    // Which map this room is playing on. Points into GameData::maps (which
+    // outlives every GameRoom), and can change via select_map any time
+    // before start_game — the evaluator/judge take it per call for exactly
+    // this reason, rather than having it fixed at their construction.
+    const MapDef* selected_map_;
 
     std::vector<int> criminal_queue_;
     int round_number_ = 0;
