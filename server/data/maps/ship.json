@@ -1,0 +1,20 @@
+{
+  "id": "ship",
+  "name": "심야의 유람선",
+  "image": "ship.svg",
+  "rooms": [
+    {"id": "bridge", "name": "조타실"},
+    {"id": "deck", "name": "갑판"},
+    {"id": "lounge", "name": "라운지"},
+    {"id": "cabin", "name": "선실"},
+    {"id": "galley", "name": "주방"},
+    {"id": "engine_room", "name": "기관실"}
+  ],
+  "edges": [
+    ["bridge", "deck"],
+    ["deck", "lounge"],
+    ["lounge", "cabin"],
+    ["cabin", "galley"],
+    ["galley", "engine_room"]
+  ]
+}

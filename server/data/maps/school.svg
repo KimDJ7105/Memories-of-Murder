@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 680" font-family="Georgia, 'Times New Roman', serif">
+  <rect x="0" y="0" width="800" height="680" fill="#ece2c6"/>
+  <text x="400" y="34" text-anchor="middle" font-size="24" fill="#2b2116" letter-spacing="4">심야의 학교 단면도</text>
+  <line x1="150" y1="46" x2="650" y2="46" stroke="#8a7a55" stroke-width="1.5"/>
+
+  <!-- ROOFTOP (above library), outdoor -->
+  <rect x="260" y="100" width="200" height="110" fill="#c7d6cf" stroke="#4a5c54" stroke-width="3" stroke-dasharray="8 5"/>
+  <text x="360" y="150" text-anchor="middle" font-size="19" fill="#2b2116">옥상</text>
+  <text x="360" y="172" text-anchor="middle" font-size="11" fill="#4a5c54" font-style="italic">rooftop</text>
+  <rect x="415" y="120" width="24" height="34" fill="none" stroke="#4a5c54" stroke-width="2"/>
+  <line x1="280" y1="195" x2="440" y2="195" stroke="#4a5c54" stroke-width="2"/>
+  <!-- gap + stairs down to library -->
+  <line x1="260" y1="210" x2="325" y2="210" stroke="#2b2116" stroke-width="4"/>
+  <line x1="395" y1="210" x2="460" y2="210" stroke="#2b2116" stroke-width="4"/>
+  <g stroke="#8a7a55" stroke-width="2">
+    <line x1="332" y1="210" x2="340" y2="217"/>
+    <line x1="342" y1="210" x2="350" y2="217"/>
+    <line x1="352" y1="210" x2="360" y2="217"/>
+    <line x1="362" y1="210" x2="370" y2="217"/>
+    <line x1="372" y1="210" x2="380" y2="217"/>
+    <line x1="382" y1="210" x2="388" y2="217"/>
+  </g>
+
+  <!-- LIBRARY (2nd floor, above classroom) -->
+  <rect x="260" y="210" width="200" height="150" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
+  <text x="360" y="280" text-anchor="middle" font-size="19" fill="#2b2116">도서실</text>
+  <text x="360" y="302" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">library</text>
+  <!-- gap + stairs down to classroom -->
+  <line x1="260" y1="360" x2="325" y2="360" stroke="#2b2116" stroke-width="4"/>
+  <line x1="395" y1="360" x2="460" y2="360" stroke="#2b2116" stroke-width="4"/>
+  <g stroke="#8a7a55" stroke-width="2">
+    <line x1="332" y1="360" x2="340" y2="367"/>
+    <line x1="342" y1="360" x2="350" y2="367"/>
+    <line x1="352" y1="360" x2="360" y2="367"/>
+    <line x1="362" y1="360" x2="370" y2="367"/>
+    <line x1="372" y1="360" x2="380" y2="367"/>
+    <line x1="382" y1="360" x2="388" y2="367"/>
+  </g>
+
+  <!-- GROUND FLOOR: science_lab | classroom | nurse -->
+  <rect x="60"  y="360" width="200" height="150" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
+  <text x="160" y="430" text-anchor="middle" font-size="19" fill="#2b2116">과학실</text>
+  <text x="160" y="452" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">science lab</text>
+
+  <rect x="260" y="360" width="200" height="150" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
+  <text x="360" y="430" text-anchor="middle" font-size="19" fill="#2b2116">교실</text>
+  <text x="360" y="452" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">classroom</text>
+
+  <rect x="460" y="360" width="200" height="150" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
+  <text x="560" y="430" text-anchor="middle" font-size="19" fill="#2b2116">보건실</text>
+  <text x="560" y="452" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">nurse's office</text>
+
+  <!-- door: science_lab <-> classroom -->
+  <line x1="260" y1="360" x2="260" y2="405" stroke="#2b2116" stroke-width="4"/>
+  <line x1="260" y1="465" x2="260" y2="510" stroke="#2b2116" stroke-width="4"/>
+  <!-- door: classroom <-> nurse -->
+  <line x1="460" y1="360" x2="460" y2="405" stroke="#2b2116" stroke-width="4"/>
+  <line x1="460" y1="465" x2="460" y2="510" stroke="#2b2116" stroke-width="4"/>
+
+  <!-- GYM (separate building), reached by a covered walkway from classroom -->
+  <rect x="540" y="560" width="220" height="100" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
+  <text x="650" y="605" text-anchor="middle" font-size="19" fill="#2b2116">체육관</text>
+  <text x="650" y="627" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">gym</text>
+
+  <!-- covered walkway: classroom -> gym -->
+  <path d="M 380 510 C 420 540, 480 545, 545 585" fill="none" stroke="#8a7a55" stroke-width="3" stroke-dasharray="10 6"/>
+  <text x="470" y="555" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">연결 통로</text>
+
+  <!-- Compass rose -->
+  <g transform="translate(730,90)">
+    <circle r="16" fill="none" stroke="#8a7a55" stroke-width="1.5"/>
+    <line x1="0" y1="-16" x2="0" y2="16" stroke="#8a7a55" stroke-width="1"/>
+    <line x1="-16" y1="0" x2="16" y2="0" stroke="#8a7a55" stroke-width="1"/>
+    <text x="0" y="-20" text-anchor="middle" font-size="11" fill="#5a4d38">N</text>
+  </g>
+</svg>
