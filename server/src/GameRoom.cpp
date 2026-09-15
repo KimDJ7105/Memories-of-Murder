@@ -554,6 +554,15 @@ void GameRoom::finish_round()
     nlohmann::json gained_json = nlohmann::json::object();
     for (const auto& [id, amount] : gained) gained_json[std::to_string(id)] = amount;
 
+    // The per-category breakdown (like `evaluation` and `key_facts`) is
+    // withheld until round_result, same as the rest of the AI's reasoning
+    // — showing it earlier via crime_score_revealed could hint at aspects
+    // of the crime before detectives finish investigating.
+    nlohmann::json breakdown_json = nlohmann::json::array();
+    for (const auto& item : crime_eval_.breakdown) {
+        breakdown_json.push_back({{"category", item.category}, {"score", item.score}, {"max", item.max}});
+    }
+
     sender_.broadcast({{"type", "round_result"},
                {"round", round_number_},
                {"criminal_id", criminal_id_},
@@ -562,6 +571,7 @@ void GameRoom::finish_round()
                {"location", crime_location_name_},
                {"location_id", crime_location_id_},
                {"crime_score", crime_eval_.score},
+               {"score_breakdown", breakdown_json},
                {"evaluation", crime_eval_.evaluation},
                {"key_facts", crime_eval_.key_facts},
                {"scores_gained", gained_json},

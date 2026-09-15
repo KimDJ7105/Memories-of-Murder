@@ -83,6 +83,12 @@
   .badge.host { background: #d8b34a; }
   .badge.turn { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+  .score-breakdown { list-style: none; padding: 0; margin: 8px 0 16px; }
+  .score-breakdown li { margin-bottom: 7px; }
+  .score-breakdown .cat-row { display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 3px; }
+  .score-breakdown .cat-track { background: var(--paper-dark); border: 1px solid var(--rule); height: 8px; }
+  .score-breakdown .cat-fill { background: var(--accent); height: 100%; }
+
   .role-banner { font-weight: bold; padding: 8px 12px; margin-bottom: 12px; border: 2px solid var(--ink); text-align: center; }
   .role-banner.criminal { background: #e5c9c9; }
   .role-banner.detective { background: #c9d3e5; }
@@ -474,11 +480,20 @@ function renderRoundResult(msg) {
     const p = players.find(pl => String(pl.id) === id);
     return `<li>${p ? p.name : id}: +${amt}점</li>`;
   }).join('');
+  const breakdown = (msg.score_breakdown || []).map(item => {
+    const pct = item.max > 0 ? Math.round((item.score / item.max) * 100) : 0;
+    return `<li>
+      <div class="cat-row"><span>${item.category}</span><span>${item.score} / ${item.max}</span></div>
+      <div class="cat-track"><div class="cat-fill" style="width:${pct}%"></div></div>
+    </li>`;
+  }).join('');
   $('result-body').innerHTML = `
     <p><b>범인:</b> ${players.find(p => p.id === msg.criminal_id)?.name ?? msg.criminal_id}</p>
     <p><b>장소:</b> ${msg.location} / <b>흉기:</b> ${msg.weapon}</p>
     <p><b>범행 전문:</b> ${msg.crime_text}</p>
-    <p><b>범행 점수:</b> ${msg.crime_score} — ${msg.evaluation}</p>
+    <p><b>범행 총점:</b> ${msg.crime_score} / 100</p>
+    <ul class="score-breakdown">${breakdown}</ul>
+    <p><b>총평:</b> ${msg.evaluation}</p>
     <ul>${gained}</ul>
     <h3>이번 라운드의 추리들</h3>
     <div id="result-guess-log">${roundGuessLogHtml.join('') || '<p>제출된 추리가 없습니다.</p>'}</div>

@@ -30,9 +30,11 @@
 | `investigation_turn_start` | `detective_id`, `attempt` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회) |
 | `guess_pending` | - | 방금 제출한 탐정 본인에게만: AI가 판정 중이라는 뜻. 판정이 끝날 때까지 그 탐정은 재제출할 수 없다 |
 | `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 장소"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. "은닉 장소"(어디에 숨겼는지)와 "은닉 방법"(어떻게 숨겼는지)은 서로 다른 항목. 전원에게 공개 |
-| `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
+| `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `score_breakdown[]`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
+
+`score_breakdown`은 `[{"category": "장소/환경 일치성", "score": 20, "max": 25}, ...]` 형태의 배열로, `docs/DESIGN.md` 7장의 평가 기준 다섯 항목(장소/환경 일치성 25점, 이동 및 실행 가능성 20점, 무기 사용의 개연성 20점, 범행 과정의 개연성 20점, 증거/무기 은닉의 개연성 15점)을 항상 이 순서 그대로 담는다. `crime_score`는 이 다섯 항목 점수의 합과 항상 정확히 일치한다 — AI가 총점을 별도로 지어내지 않고 서버가 `score_breakdown`을 합산해서 계산하기 때문(`OllamaCrimeEvaluator::parse_evaluation` 참고). `score_breakdown` 역시 `evaluation`/`key_facts`와 마찬가지로 `crime_score_revealed`가 아니라 `round_result`에서만 공개된다.
 
 ## 여러 방 운영 (RoomManager)
 
