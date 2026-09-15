@@ -250,7 +250,15 @@ let nextRoundCountdownTimer = null;
 let roundGuessLogHtml = [];
 
 function connect() {
-  ws = new WebSocket('ws://localhost:9002');
+  // Same host the page itself was loaded from, not a hardcoded
+  // "localhost" — so this file works unmodified whether it's opened
+  // locally (file://, where location.hostname is empty and falls back to
+  // localhost) or served from a LAN/port-forwarded machine at some IP:
+  // whoever loads http://<that-ip>:<http-port>/ also connects back to
+  // ws://<that-ip>:9002 automatically, no manual editing needed per
+  // player. The WS port itself still has to match main.cpp's fixed 9002.
+  const wsHost = location.hostname || 'localhost';
+  ws = new WebSocket(`ws://${wsHost}:9002`);
   ws.onopen = () => { $('connection').textContent = '연결됨'; $('connection').className = 'ok'; };
   ws.onclose = () => { $('connection').textContent = '연결 끊김'; $('connection').className = 'bad'; };
   ws.onerror = () => { $('connection').textContent = '연결 오류'; $('connection').className = 'bad'; };

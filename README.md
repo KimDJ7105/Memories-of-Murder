@@ -52,6 +52,22 @@ cmake --build --preset windows-ninja-msvc
 
 > 현재 `game_server`는 게임 로직이 없는 순수 WebSocket 에코 서버로, 툴체인(MSVC + Ninja + vcpkg + Boost.Beast)이 정상 동작하는지 검증하기 위한 최소 골격입니다. 실제 게임 로직은 [docs/DESIGN.md](docs/DESIGN.md)의 Phase 1부터 순차적으로 구현합니다.
 
+### 친구와 함께 플레이하기 (LAN / 포트 포워딩)
+
+`client/index.html`은 하드코딩된 `localhost` 대신 페이지 자신이 로드된 주소(`location.hostname`)로 WebSocket에 접속하므로, 파일을 그대로 열지 않고 정적 파일 서버로 서빙하면 다른 컴퓨터에서도 접속할 수 있다.
+
+1. 게임 서버 실행: `./build/server/game_server.exe` (WebSocket, `9002`번 포트)
+2. `client/` 디렉터리에서 정적 파일 서버 실행 (아무 툴이나 무방, 예시는 Python):
+   ```powershell
+   cd client
+   python -m http.server 8080
+   ```
+3. 공유기에서 `9002`(WebSocket)와 `8080`(HTTP) 두 포트를 이 컴퓨터로 포트 포워딩
+4. Windows 방화벽이 `game_server.exe`/`python.exe`의 인바운드 연결을 막고 있지 않은지 확인 (사설/공용 네트워크 모두 허용)
+5. 친구들에게 `http://<공인 IP>:8080/` 하나만 공유 — 접속하면 페이지가 자동으로 같은 IP의 `9002`번으로 WebSocket 연결을 맺는다
+
+서버 자체는 이미 `tcp::v4()`(모든 인터페이스)로 바인딩되어 있어 별도 설정 없이도 외부 접속을 받을 수 있다.
+
 ## 디렉토리 구조
 
 ```
