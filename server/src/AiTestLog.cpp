@@ -52,7 +52,12 @@ void log_ai_test_event(nlohmann::json record)
 
     std::ofstream out(dir / (date.str() + ".jsonl"), std::ios::app);
     if (!out) return;
-    out << record.dump() << "\n";
+    // replace, not the default throwing handler: this can carry a fallback
+    // CrimeEvaluation's evaluation text, which can itself carry a raw OS
+    // error message (see Session::send for why that's not guaranteed to
+    // be valid UTF-8) — a debug/testing log write must never be able to
+    // crash the server.
+    out << record.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
 }
 
 }

@@ -46,7 +46,18 @@ void Session::on_read(beast::error_code ec, std::size_t)
 
 void Session::send(const nlohmann::json& msg)
 {
-    write_queue_.push_back(msg.dump());
+    // error_handler_t::replace, not the (throwing) default: a string that
+    // reaches here isn't guaranteed to be valid UTF-8 in every case — most
+    // notably, boost::system::error_code::message() on Windows returns OS
+    // error text in the system's ANSI codepage (e.g. Korean text in CP949
+    // on a Korean-locale machine), not UTF-8, and that text can flow into
+    // a fallback CrimeEvaluation's `evaluation` field when Ollama is
+    // unreachable. dump()'s default UTF-8 validation throws on that, and
+    // an uncaught throw here unwinds out of the io_context and kills the
+    // whole server process — reproduced live, not hypothetical. Replacing
+    // invalid sequences with U+FFFD keeps every other room's connection
+    // alive instead.
+    write_queue_.push_back(msg.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
     if (!writing_) do_write();
 }
 

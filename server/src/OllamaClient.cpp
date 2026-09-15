@@ -64,7 +64,12 @@ void OllamaClient::chat_json(const std::string& model,
     req_.set(http::field::host, host_);
     req_.set(http::field::content_type, "application/json");
     req_.keep_alive(false);
-    req_.body() = body.dump();
+    // replace, not the default throwing handler: see Session::send for why
+    // a string reaching a dump() call in this codebase isn't guaranteed to
+    // be valid UTF-8 (today, everything fed into this particular body is,
+    // but there's no benefit to leaving a throwing dump() in place here
+    // only to have to remember why later).
+    req_.body() = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     req_.prepare_payload();
 
     buffer_.clear();
