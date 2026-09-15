@@ -2,8 +2,9 @@
   "id": "ship",
   "name": "심야의 유람선",
   "image": "ship.svg",
+  "surveillance_label": "당직 선원",
   "rooms": [
-    {"id": "bridge", "name": "조타실"},
+    {"id": "bridge", "name": "조타실", "surveilled": true},
     {"id": "deck", "name": "갑판"},
     {"id": "lounge", "name": "라운지"},
     {"id": "cabin", "name": "선실"},

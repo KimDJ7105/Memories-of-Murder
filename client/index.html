@@ -82,6 +82,7 @@
   .badge { font-size: 0.7em; padding: 2px 6px; border: 1px solid var(--ink); margin-left: 6px; }
   .badge.host { background: #d8b34a; }
   .badge.turn { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .badge.watch { color: var(--accent); border-color: var(--accent); background: transparent; }
 
   .score-breakdown { list-style: none; padding: 0; margin: 8px 0 16px; }
   .score-breakdown li { margin-bottom: 7px; }
@@ -388,7 +389,10 @@ function renderMap(map, rooms, edges) {
 
   $('map-rooms').innerHTML = rooms.map(r => {
     const links = neighborsOf(r.id).join(', ');
-    return `<li><span class="room-name">${r.name}</span> <span class="room-links">— 연결: ${links}</span></li>`;
+    const watch = r.surveilled
+      ? ` <span class="badge watch">${map.surveillance_label ?? '감시'} 상시 감시 중</span>`
+      : '';
+    return `<li><span class="room-name">${r.name}</span>${watch} <span class="room-links">— 연결: ${links}</span></li>`;
   }).join('');
 }
 

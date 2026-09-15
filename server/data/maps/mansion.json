@@ -2,10 +2,11 @@
   "id": "mansion",
   "name": "낡은 저택",
   "image": "mansion.svg",
+  "surveillance_label": "CCTV",
   "rooms": [
     {"id": "attic", "name": "다락방"},
     {"id": "library", "name": "서재"},
-    {"id": "kitchen", "name": "주방"},
+    {"id": "kitchen", "name": "주방", "surveilled": true},
     {"id": "garage", "name": "차고"},
     {"id": "garden", "name": "정원"},
     {"id": "basement", "name": "지하실"}

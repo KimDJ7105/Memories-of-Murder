@@ -14,6 +14,12 @@
   <rect x="170" y="70" width="130" height="90" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
   <text x="235" y="112" text-anchor="middle" font-size="18" fill="#2b2116">조타실</text>
   <text x="235" y="133" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">bridge</text>
+  <!-- 당직 선원: this room always has a crewman on watch (surveilled: true) -->
+  <g transform="translate(258,86)">
+    <circle cx="0" cy="0" r="4" fill="#7a1f1f"/>
+    <path d="M -5,5 L 5,5 L 4,16 L -4,16 Z" fill="#7a1f1f"/>
+    <text x="0" y="28" text-anchor="middle" font-size="9" fill="#7a1f1f" font-weight="bold">당직</text>
+  </g>
   <!-- gap + stairs down to deck -->
   <line x1="170" y1="160" x2="212" y2="160" stroke="#2b2116" stroke-width="4"/>
   <line x1="258" y1="160" x2="300" y2="160" stroke="#2b2116" stroke-width="4"/>

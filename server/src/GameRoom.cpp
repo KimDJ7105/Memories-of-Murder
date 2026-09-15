@@ -248,7 +248,7 @@ nlohmann::json GameRoom::build_board_info() const
     const MapDef& map = *selected_map_;
 
     nlohmann::json rooms = nlohmann::json::array();
-    for (const auto& r : map.rooms) rooms.push_back({{"id", r.id}, {"name", r.name}});
+    for (const auto& r : map.rooms) rooms.push_back({{"id", r.id}, {"name", r.name}, {"surveilled", r.surveilled}});
 
     nlohmann::json edges = nlohmann::json::array();
     for (const auto& [a, b] : map.edges) edges.push_back({a, b});
@@ -261,7 +261,9 @@ nlohmann::json GameRoom::build_board_info() const
 
     return {{"type", "board_info"},
             {"available_maps", available_maps},
-            {"map", {{"id", map.id}, {"name", map.name}, {"image", map.image ? nlohmann::json(*map.image) : nlohmann::json(nullptr)}}},
+            {"map", {{"id", map.id}, {"name", map.name},
+                     {"image", map.image ? nlohmann::json(*map.image) : nlohmann::json(nullptr)},
+                     {"surveillance_label", map.surveillance_label ? nlohmann::json(*map.surveillance_label) : nlohmann::json(nullptr)}}},
             {"rooms", rooms},
             {"edges", edges},
             {"weapons", weapons}};

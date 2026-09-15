@@ -10,6 +10,14 @@ namespace mom {
 struct RoomDef {
     std::string id;
     std::string name;
+    // Always-on, fixed-location watch (CCTV, a stationed guard, etc. —
+    // see MapDef::surveillance_label for how this map names it). No time
+    // window or patrol path: those were considered and rejected, since a
+    // criminal's free-text narration can't be checked against either
+    // (docs/DESIGN.md section 15-3's brainstorm ran into this — "the
+    // guard happened to be elsewhere" is exactly as unverifiable as a
+    // claimed time of night).
+    bool surveilled = false;
 };
 
 struct WeaponDef {
@@ -25,6 +33,11 @@ struct MapDef {
     // at load time — nullopt if the map has no image yet. Clients can
     // drop this straight into an <img src="...">.
     std::optional<std::string> image;
+    // What to call this map's surveilled room(s) in the UI and in the AI
+    // prompt ("CCTV", "경비병 상주 구역", ...) — nullopt means this map has
+    // no surveillance system at all, in which case no RoomDef on it should
+    // have `surveilled` set.
+    std::optional<std::string> surveillance_label;
     std::vector<RoomDef> rooms;
     std::vector<std::pair<std::string, std::string>> edges;
 };

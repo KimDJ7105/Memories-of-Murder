@@ -93,11 +93,15 @@ MapDef parse_map(const nlohmann::json& j, const std::filesystem::path& maps_dir)
         const std::string image_file = j.at("image").get<std::string>();
         map.image = load_image_as_data_uri(maps_dir / image_file);
     }
+    if (j.contains("surveillance_label") && !j.at("surveillance_label").is_null()) {
+        map.surveillance_label = j.at("surveillance_label").get<std::string>();
+    }
 
     for (const auto& r : j.at("rooms")) {
         RoomDef room;
         room.id = r.at("id").get<std::string>();
         room.name = r.at("name").get<std::string>();
+        room.surveilled = r.value("surveilled", false);
         map.rooms.push_back(std::move(room));
     }
     for (const auto& e : j.at("edges")) {

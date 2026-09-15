@@ -43,8 +43,27 @@ std::string build_system_prompt(const GameData& data, const MapDef& map)
     std::ostringstream weapons;
     for (const auto& w : data.weapons) weapons << "- " << w.name << "\n";
 
+    // Surveilled rooms are always-on risk zones (see docs/PROTOCOL.md
+    // "감시 구역") — a static map property, never a time-of-day or patrol
+    // schedule the criminal's free text could just claim was empty. Folded
+    // into the existing "범행 과정의 개연성" category rather than adding a
+    // sixth rubric item, so the 100-point total never needs rebalancing.
+    std::ostringstream surveillance;
+    for (const auto& r : map.rooms) {
+        if (r.surveilled) surveillance << "- " << r.name << "\n";
+    }
+    const bool has_surveillance = map.surveillance_label.has_value() && !surveillance.str().empty();
+
     std::ostringstream criteria;
-    for (const auto& c : kCategories) criteria << "- " << c.name << " (" << c.max << "점)\n";
+    for (const auto& c : kCategories) {
+        criteria << "- " << c.name << " (" << c.max << "점)";
+        if (has_surveillance && std::string(c.name) == "범행 과정의 개연성") {
+            criteria << ": 감시 구역을 지나가거나 그 안에서 범행을 저질렀다면, 그 위험을 "
+                         "어떻게 피하거나 대비했는지도 이 항목에서 함께 판단하세요. 서술에 "
+                         "그런 위험 인지·대응이 전혀 없다면 감점하세요.";
+        }
+        criteria << "\n";
+    }
 
     std::ostringstream breakdown_schema;
     for (size_t i = 0; i < std::size(kCategories); ++i) {
@@ -58,7 +77,11 @@ std::string build_system_prompt(const GameData& data, const MapDef& map)
         "당신은 추리 게임 '살인의 추억'의 범행 평가관입니다.\n\n"
         "지도에 있는 방 목록:\n" << rooms.str() <<
         "\n서로 붙어 있어 이동 가능한 방 쌍:\n" << edges.str() <<
-        "\n사용 가능한 흉기 목록:\n" << weapons.str() <<
+        "\n사용 가능한 흉기 목록:\n" << weapons.str();
+    if (has_surveillance) {
+        prompt << "\n항상 " << *map.surveillance_label << "(으)로 감시되는 위험 구역:\n" << surveillance.str();
+    }
+    prompt <<
         "\n범인이 자유 서술형으로 작성한 범행을 다음 다섯 항목으로 나누어 평가하세요:\n" << criteria.str() <<
         "\n각 항목마다 그 항목의 만점을 넘지 않는 정수 점수를 매기세요. 항목별 점수의 합이 "
         "최종 점수가 되므로, 전체적으로 몇 점을 주고 싶은지를 먼저 정한 뒤 그걸 다섯 항목에 "

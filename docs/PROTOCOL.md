@@ -22,7 +22,7 @@
 |---|---|---|
 | `room_created` | `room_code`, `player_id` | `create_room` 성공 응답. 이 방 코드를 다른 플레이어에게 알려줘야 같이 플레이할 수 있다 |
 | `joined` | `room_code`, `player_id` | `join_room` 성공 응답 |
-| `board_info` | `available_maps[{id,name}]`, `map{id,name,image}`, `rooms[{id,name}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null |
+| `board_info` | `available_maps[{id,name}]`, `map{id,name,image,surveillance_label}`, `rooms[{id,name,surveilled}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null. `surveillance_label`은 이 지도의 감시 시스템을 부르는 이름("CCTV", "당직 선원" 등)이고 그런 시스템이 없는 지도면 null. `rooms[].surveilled`가 true인 방은 항상 감시되는 위험 구역이며(로비 때부터 공개된 정보), 지도 이미지에도 표시되어 있다 |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
@@ -91,6 +91,12 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
 지도 데이터 자체는 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다 (좌표를 넣었다가 아무 기능도 쓰지 않길래 도로 뺀 적이 있다 — git log 참고). `image`는 지도와 같은 폴더에 있는 이미지 파일 이름(`mansion.svg`처럼)을 가리키고, `GameData`가 서버 시작 시 그 파일을 딱 한 번 읽어서 base64 `data:` URI로 인코딩해 메모리에 들고 있는다 — 매 요청마다 다시 읽거나 인코딩하지 않고, `board_info`를 보낼 때 이미 완성된 문자열을 그대로 끼워 넣기만 한다. 이 방식 덕분에 이미지 하나 보여주자고 별도의 HTTP 정적 파일 서버를 둘 필요가 없다 (지금 서버는 WebSocket 하나뿐이다). 확장자로 MIME 타입을 판단하므로(`.svg`→`image/svg+xml`, `.png`→`image/png` 등) 나중에 실제 손그림/AI 생성 PNG로 바꾸고 싶으면 그 확장자의 파일로 교체하고 JSON의 `image` 값만 바꾸면 된다 — 코드 변경 없음.
 
 `GameRoom`은 방마다 `selected_map_`(기본값은 `GameData::default_map()`, 지금은 "mansion")을 들고 있고, 호스트가 Lobby에서 `select_map`을 보내면 그때그때 바뀐다. `ICrimeEvaluator`/`IGuessJudge`는 방 생성 시 한 번만 만들어지므로(지도 선택보다 먼저 존재), 어떤 지도를 쓸지는 생성자가 아니라 `evaluate`/`judge` 호출마다 인자로 넘겨받는다.
+
+## 감시 구역 (CCTV / 경비)
+
+일부 지도는 항상 감시되는 방을 하나씩 가진다 — 방 데이터의 `surveilled: true`와 지도 데이터의 `surveillance_label`(그 지도에서 감시 시스템을 부르는 이름, 예: "CCTV", "당직 선원")로 표현된다. 시간대나 순찰 경로처럼 검증할 수 없는 요소는 의도적으로 넣지 않았다 — 범인의 자유 서술을 반박할 근거가 서버에 없는 요소는(예: "새벽이라 경비가 없었다") 사실상 페널티 없는 장식 텍스트가 되어버리기 때문에, 오직 "이 방은 항상 위험하다"는 정적 속성 하나만 존재한다.
+
+감시 구역은 흉기·지도 목록과 마찬가지로 로비 때부터 공개된 정보다(숨겨뒀다가 나중에 드러내는 함정이 아니라, 범인이 그 위험을 감수할지 미리 고민하게 만드는 요소). 지도 이미지에도 그 방이 표시되어 있고, `OllamaCrimeEvaluator`는 범인의 서술이 감시 구역을 지나가면서 그 위험을 어떻게 처리했는지를 "범행 과정의 개연성" 항목(`docs/DESIGN.md` 7장) 채점에 반영한다 — 별도의 6번째 채점 항목을 새로 만들지 않고 기존 100점 배분을 그대로 유지했다.
 
 ## AI 백엔드 (Phase 2)
 

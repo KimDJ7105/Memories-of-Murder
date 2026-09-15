@@ -28,6 +28,14 @@
   <rect x="240" y="190" width="200" height="140" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
   <text x="340" y="255" text-anchor="middle" font-size="19" fill="#2b2116">주방</text>
   <text x="340" y="277" text-anchor="middle" font-size="11" fill="#5a4d38" font-style="italic">kitchen</text>
+  <!-- CCTV: this room is always under surveillance (surveilled: true) -->
+  <g transform="translate(390,205)">
+    <polygon points="0,0 18,-6 18,10 0,4" fill="#7a1f1f" stroke="#2b2116" stroke-width="1.5"/>
+    <circle cx="14" cy="2" r="3" fill="#2b2116"/>
+    <line x1="18" y1="-2" x2="34" y2="-14" stroke="#7a1f1f" stroke-width="1.5" stroke-dasharray="3 3"/>
+    <line x1="18" y1="8" x2="34" y2="20" stroke="#7a1f1f" stroke-width="1.5" stroke-dasharray="3 3"/>
+    <text x="9" y="26" text-anchor="middle" font-size="10" fill="#7a1f1f" font-weight="bold">CCTV</text>
+  </g>
 
   <rect x="440" y="190" width="200" height="140" fill="#e3d6ac" stroke="#2b2116" stroke-width="4"/>
   <text x="540" y="255" text-anchor="middle" font-size="19" fill="#2b2116">차고</text>

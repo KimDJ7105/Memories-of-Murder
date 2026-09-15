@@ -2,9 +2,10 @@
   "id": "school",
   "name": "심야의 학교",
   "image": "school.svg",
+  "surveillance_label": "CCTV",
   "rooms": [
     {"id": "science_lab", "name": "과학실"},
-    {"id": "classroom", "name": "교실"},
+    {"id": "classroom", "name": "교실", "surveilled": true},
     {"id": "nurse", "name": "보건실"},
     {"id": "library", "name": "도서실"},
     {"id": "rooftop", "name": "옥상"},
