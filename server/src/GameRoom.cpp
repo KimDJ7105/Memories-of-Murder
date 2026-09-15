@@ -87,6 +87,18 @@ void GameRoom::handle_disconnect(int player_id)
 
     p->connected = false;
 
+    // Host succession applies here too, not just in Lobby: without it, a
+    // host who disconnects mid-game leaves host_id_ pointing at a session
+    // that will never come back (there's no reconnect feature), which
+    // permanently locks out host-only actions for whoever's left — most
+    // importantly restart_game, which only fires on an explicit host
+    // message and has no timer fallback the way next_round does.
+    if (host_id_ == player_id) {
+        auto it = std::find_if(players_.begin(), players_.end(),
+                                [](const Player& pl) { return pl.connected; });
+        host_id_ = (it != players_.end()) ? it->id : -1;
+    }
+
     const bool round_in_progress =
         state_ == GameState::CrimeWriting || state_ == GameState::AIJudging ||
         state_ == GameState::Investigation;
@@ -355,7 +367,11 @@ void GameRoom::run_ai_judging()
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
     const int round = round_number_;
     const int criminal_id = criminal_id_;
-    evaluator_->evaluate(crime, *selected_map_, [this, crime, round, criminal_id](CrimeEvaluation eval) {
+    const int generation = turn_generation_;
+    std::weak_ptr<char> alive = alive_;
+    evaluator_->evaluate(crime, *selected_map_, [this, crime, round, criminal_id, generation, alive](CrimeEvaluation eval) {
+        if (alive.expired()) return;  // room was torn down while this call was in flight
+        if (generation != turn_generation_) return;  // round was aborted (e.g. criminal disconnected) before this arrived
         log_ai_test_event({{"type", "crime_evaluation"},
                             {"round", round},
                             {"criminal_id", criminal_id},
@@ -439,9 +455,12 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
     guess_in_flight_ = true;
     sender_.send(player_id, {{"type", "guess_pending"}});
     const int generation = turn_generation_;
+    std::weak_ptr<char> alive = alive_;
 
     Crime crime{crime_location_name_, crime_weapon_, crime_text_};
-    judge_->judge(crime, *selected_map_, text, [this, player_id, text, crime, generation](GuessFeedback fb) {
+    judge_->judge(crime, *selected_map_, text, [this, player_id, text, crime, generation, alive](GuessFeedback fb) {
+        if (alive.expired()) return;  // room was torn down while this call was in flight
+
         if (generation != turn_generation_) {
             // The turn (or round) already moved on without this result —
             // e.g. this detective disconnected while the AI was still

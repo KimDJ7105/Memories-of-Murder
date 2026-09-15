@@ -158,6 +158,16 @@ private:
     // disconnected mid-call is discarded instead of corrupting whatever
     // turn/round is active by then.
     int turn_generation_ = 0;
+
+    // Owned only by this GameRoom. Every AI callback (evaluate/judge)
+    // captures a weak_ptr to this and checks expired() as its very first
+    // line, before touching turn_generation_ or anything else. If the room
+    // became empty and RoomManager destroyed this GameRoom while the HTTP
+    // call to Ollama was still in flight, the shared_ptr's refcount drops
+    // to zero, the weak_ptr expires, and the callback bails out instead of
+    // reading/writing freed memory. This is a real, reproduced crash (see
+    // docs/STABILITY_ISSUES.md), not a hypothetical one.
+    std::shared_ptr<char> alive_ = std::make_shared<char>(0);
 };
 
 }
