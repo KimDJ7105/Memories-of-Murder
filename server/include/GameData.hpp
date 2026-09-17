@@ -40,15 +40,27 @@ struct MapDef {
     std::optional<std::string> surveillance_label;
     std::vector<RoomDef> rooms;
     std::vector<std::pair<std::string, std::string>> edges;
+    // The subset of GameData::weapons available on this map, so a school
+    // doesn't offer a gun and a modern cruise ship doesn't offer a
+    // candlestick — thematic fit, decided per map's own JSON ("weapons":
+    // [id, ...]). A map that omits the field gets every globally-defined
+    // weapon (see GameData::load_default), so existing/new maps don't have
+    // to opt in explicitly.
+    std::vector<WeaponDef> weapons;
 };
 
 // All game content that isn't per-round state: every available map (rooms
-// + adjacency + optional image) and the weapon pool (shared across all
-// maps). Loaded once from server/data/*.json instead of being hardcoded,
-// so adding a new map or weapon set later is a new file, not a recompile
-// (see docs/DESIGN.md section 15-3, "범행 유형/테마").
+// + adjacency + optional image + its own weapon subset) and the full
+// weapon pool each map's subset is drawn from. Loaded once from
+// server/data/*.json instead of being hardcoded, so adding a new map or
+// weapon set later is a new file, not a recompile (see docs/DESIGN.md
+// section 15-3, "범행 유형/테마").
 struct GameData {
     std::vector<MapDef> maps;
+    // Canonical id->name definitions for every weapon that exists in the
+    // game. Individual maps only ever expose a subset of these (see
+    // MapDef::weapons) — this list exists so map JSON files can reference
+    // weapons by a short id instead of repeating {id, name} everywhere.
     std::vector<WeaponDef> weapons;
 
     const MapDef* find_map(const std::string& id) const;
@@ -66,7 +78,7 @@ struct GameData {
     // 2's AI evaluator should eventually take over this extraction
     // (docs/DESIGN.md section 8).
     const RoomDef* extract_room_mention(const MapDef& map, const std::string& text) const;
-    const WeaponDef* extract_weapon_mention(const std::string& text) const;
+    const WeaponDef* extract_weapon_mention(const MapDef& map, const std::string& text) const;
 
     static GameData load_default();
 };

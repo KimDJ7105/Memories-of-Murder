@@ -3,6 +3,7 @@
   "name": "낡은 저택",
   "image": "mansion.svg",
   "surveillance_label": "CCTV",
+  "weapons": ["knife", "blunt", "rope", "poison", "gun", "candlestick"],
   "rooms": [
     {"id": "attic", "name": "다락방"},
     {"id": "library", "name": "서재"},

@@ -47,6 +47,13 @@ void MockCrimeEvaluator::evaluate(const Crime& crime, const MapDef&, std::functi
 
     eval.evaluation = "Mock 평가: 세부 묘사와 장소/무기 언급을 기준으로 산출된 임시 점수입니다.";
     eval.key_facts = {"장소: " + crime.location, "무기: " + crime.weapon};
+    eval.answer_key = {
+        {"장소", crime.location},
+        {"무기", crime.weapon},
+        {"살해 방법", "(Mock 평가는 세부 요약을 제공하지 않습니다)"},
+        {"은닉 장소", "(Mock 평가는 세부 요약을 제공하지 않습니다)"},
+        {"은닉 방법", "(Mock 평가는 세부 요약을 제공하지 않습니다)"},
+    };
 
     on_done(std::move(eval));
 }

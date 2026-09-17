@@ -3,6 +3,7 @@
   "name": "심야의 유람선",
   "image": "ship.svg",
   "surveillance_label": "당직 선원",
+  "weapons": ["knife", "blunt", "rope", "poison", "gun"],
   "rooms": [
     {"id": "bridge", "name": "조타실", "surveilled": true},
     {"id": "deck", "name": "갑판"},

@@ -129,6 +129,17 @@
 
   #turn-banner { font-style: italic; margin-bottom: 8px; }
   #advance-box { margin-top: 8px; font-size: 0.9em; }
+  #advance-hint, #next-round-hint { color: var(--ink-faded); font-style: italic; }
+
+  .phase-timer { font-weight: bold; margin: 4px 0 8px; }
+  .phase-timer.warn { color: var(--accent); }
+
+  #criminal-answer-panel {
+    margin: 10px 0 14px; padding: 10px; border: 2px dashed var(--accent); background: rgba(122,31,31,0.06);
+  }
+  #criminal-answer-panel h3 { margin: 0 0 8px; font-size: 0.95em; }
+  #criminal-answer-key { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.9em; }
+  #criminal-answer-key li { padding: 2px 0; }
 
   .error { color: var(--accent); font-weight: bold; }
   #log { background: rgba(0,0,0,0.03); border: 1px solid var(--rule); padding: 8px; font-size: 0.75em; max-height: 140px; overflow-y: auto; white-space: pre-wrap; font-family: "Consolas", monospace; }
@@ -184,22 +195,30 @@
 
   <div id="score-preview" hidden></div>
 
+  <div id="criminal-answer-panel" hidden>
+    <h3>AI가 파악한 당신의 범행 (범인인 당신에게만 보입니다)</h3>
+    <ul class="score-breakdown" id="criminal-breakdown"></ul>
+    <ul id="criminal-answer-key"></ul>
+  </div>
+
   <div id="role-banner" class="role-banner"></div>
 
   <div id="crime-writing-box" hidden>
     <p>범행을 자유롭게 서술하세요. (장소와 흉기는 위 지도/목록에 있는 이름을 글 속에 자연스럽게 포함해서 써주세요)</p>
+    <p id="crime-timer" class="phase-timer"></p>
     <textarea id="crime-text" placeholder="예: 주방에서 칼을 이용해 피해자를 찌른 뒤, 그 칼을 냉장고 속 생선 배 안에 숨겼다.&#10;(장소 · 흉기 · 살해 방법 · 은닉 장소 · 은닉 방법이 자연스럽게 드러나도록 써보세요)"></textarea>
     <button id="submit-crime-btn">범행 제출</button>
   </div>
 
   <div id="investigation-box" hidden>
     <p id="turn-banner"></p>
+    <p id="guess-timer" class="phase-timer"></p>
     <textarea id="guess-text" placeholder="다음을 맞춰보세요: 장소 · 흉기 · 살해 방법 · 은닉 장소 · 은닉 방법&#10;예: 범인은 주방에서 칼로 피해자를 찌른 뒤, 냉장고 속 생선 배 안에 칼을 숨겼을 것이다."></textarea>
     <button id="submit-guess-btn">추리 제출</button>
     <div id="guess-loading" class="loading-box" hidden><span class="spinner">●</span> AI가 추리를 판단 중입니다...</div>
     <div id="advance-box" hidden>
-      <span id="advance-countdown"></span>
-      <button id="next-turn-btn">다음 차례로</button>
+      <span id="advance-hint"></span>
+      <button id="next-turn-btn" hidden>다음 차례로</button>
     </div>
   </div>
 
@@ -216,7 +235,7 @@
   <h2>라운드 결과</h2>
   <div id="result-body"></div>
   <div id="next-round-box">
-    <span id="next-round-countdown"></span>
+    <span id="next-round-hint"></span>
     <button id="next-round-btn" hidden>다음 라운드로</button>
   </div>
 </section>
@@ -245,8 +264,10 @@ let availableWeapons = [];
 let availableMaps = [];
 let currentMapId = null;
 let currentDetectiveId = null;
-let advanceCountdownTimer = null;
-let nextRoundCountdownTimer = null;
+let crimeWritingSeconds = 90;
+let guessSeconds = 45;
+let crimeTimerInterval = null;
+let guessTimerInterval = null;
 let roundGuessLogHtml = [];
 
 function connect() {
@@ -296,10 +317,12 @@ function handleMessage(msg) {
       $('round-title').textContent = `라운드 ${msg.round}`;
       $('investigation-log').innerHTML = '';
       roundGuessLogHtml = [];
-      hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box'); hide('score-preview');
+      crimeWritingSeconds = msg.crime_writing_seconds ?? crimeWritingSeconds;
+      hide('crime-writing-box'); hide('investigation-box'); hide('advance-box'); hide('waiting-box');
+      hide('score-preview'); hide('criminal-answer-panel');
       hide('guess-loading');
-      stopAdvanceCountdown();
-      stopNextRoundCountdown();
+      stopCrimeTimer();
+      stopGuessTimer();
       break;
     case 'your_role':
       myRole = msg.role;
@@ -311,6 +334,7 @@ function handleMessage(msg) {
         $('crime-text').disabled = false;
         $('submit-crime-btn').disabled = false;
         show('crime-writing-box'); hide('waiting-box');
+        startCrimeTimer(crimeWritingSeconds);
       } else {
         hide('crime-writing-box'); show('waiting-box');
         $('waiting-message').textContent = '범인이 범행을 작성하는 중...';
@@ -320,9 +344,15 @@ function handleMessage(msg) {
       $('score-preview').textContent = `이번 범행의 AI 평가 점수: ${msg.score}점`;
       show('score-preview');
       break;
+    case 'crime_answer_key':
+      // Only the criminal ever receives this message (the server sends it
+      // privately) — no role check needed here.
+      renderCriminalAnswerKey(msg);
+      break;
     case 'investigation_turn_start':
       currentDetectiveId = msg.detective_id;
-      hide('advance-box'); hide('guess-loading'); stopAdvanceCountdown();
+      guessSeconds = msg.guess_seconds ?? guessSeconds;
+      hide('advance-box'); hide('guess-loading'); stopGuessTimer();
       renderPlayers();
       if (currentDetectiveId === myId) {
         show('investigation-box'); hide('waiting-box'); hide('crime-writing-box');
@@ -331,6 +361,7 @@ function handleMessage(msg) {
         $('guess-text').disabled = false;
         $('submit-guess-btn').disabled = false;
         show('guess-text'); show('submit-guess-btn');
+        startGuessTimer(guessSeconds);
       } else {
         hide('investigation-box'); hide('crime-writing-box'); show('waiting-box');
         const name = players.find(p => p.id === currentDetectiveId)?.name ?? currentDetectiveId;
@@ -342,35 +373,33 @@ function handleMessage(msg) {
       // swap the form out for a loading indicator immediately so a
       // double-click (or a slow network) can't fire a second submit_guess
       // for the same turn.
+      stopGuessTimer();
       hide('guess-text'); hide('submit-guess-btn');
       show('guess-loading');
       break;
     case 'guess_feedback':
       appendLogEntry(msg);
-      if (msg.player_id === myId) {
-        hide('guess-loading');
-        show('advance-box');
-        startAdvanceCountdown();
-      }
+      stopGuessTimer();
+      hide('guess-loading');
+      show('advance-box');
+      renderAdvanceBox(msg.player_id);
       break;
     case 'round_result':
       show('result-screen'); hide('round-screen');
-      stopAdvanceCountdown();
+      stopGuessTimer();
       renderRoundResult(msg);
-      $('next-round-btn').hidden = !players.find(p => p.id === myId)?.is_host;
-      startNextRoundCountdown();
+      renderNextRoundBox();
       break;
     case 'game_over':
       show('gameover-screen'); hide('result-screen');
-      stopNextRoundCountdown();
       renderGameOver(msg);
       break;
     case 'error':
       log('!! ' + msg.message);
       alert(msg.message);
-      // If a guess got rejected (e.g. a rare race with the turn timer)
-      // after we'd already optimistically hidden the form, restore it so
-      // the player isn't stuck staring at a loading spinner forever.
+      // If a guess got rejected (e.g. a rare permission check) after
+      // we'd already optimistically hidden the form, restore it so the
+      // player isn't stuck staring at a loading spinner forever.
       if (roomState === 'Investigation' && currentDetectiveId === myId && !$('guess-loading').hidden) {
         hide('guess-loading');
         $('guess-text').value = '';
@@ -446,10 +475,11 @@ function renderPlayers() {
 function appendLogEntry(msg) {
   const name = players.find(p => p.id === msg.player_id)?.name ?? msg.player_id;
   const aspects = msg.aspects.map(a => `<span>${a.aspect}: ${a.verdict}</span>`).join('');
+  const guessLine = msg.timed_out ? '(시간 초과 - 응답 없음)' : `"${msg.guess_text}"`;
   const html = `
     <div class="log-entry${msg.correct ? ' correct' : ''}">
       <div><span class="who">${name}</span> (${msg.attempt}번째 시도) — ${msg.correct ? '정답' : '오답'}</div>
-      <div>"${msg.guess_text}"</div>
+      <div>${guessLine}</div>
       <div class="aspects">${aspects}</div>
     </div>
   `;
@@ -460,31 +490,83 @@ function appendLogEntry(msg) {
   roundGuessLogHtml.push(html);
 }
 
-function startAdvanceCountdown() {
-  let remaining = 10;
-  $('advance-countdown').textContent = `${remaining}초 후 자동으로 다음 차례`;
-  advanceCountdownTimer = setInterval(() => {
-    remaining--;
-    if (remaining <= 0) { stopAdvanceCountdown(); return; }
-    $('advance-countdown').textContent = `${remaining}초 후 자동으로 다음 차례`;
-  }, 1000);
-}
-function stopAdvanceCountdown() {
-  if (advanceCountdownTimer) { clearInterval(advanceCountdownTimer); advanceCountdownTimer = null; }
+// No auto-advance timer anymore (see server-side GameRoom's class comment
+// for why) — next_turn/next_round are always manual, so these just show
+// the button to whoever is actually allowed to click it (mirroring the
+// server's own permission check) and a hint for everyone else.
+function renderAdvanceBox(submitterId) {
+  const isHost = players.find(p => p.id === myId)?.is_host;
+  const canAdvance = submitterId === myId || isHost;
+  $('next-turn-btn').hidden = !canAdvance;
+  if (canAdvance) {
+    $('advance-hint').textContent = '';
+  } else {
+    const name = players.find(p => p.id === submitterId)?.name ?? submitterId;
+    $('advance-hint').textContent = `${name} 님 또는 방장이 다음 차례로 넘길 때까지 기다려주세요.`;
+  }
 }
 
-function startNextRoundCountdown() {
-  let remaining = 15;
-  $('next-round-countdown').textContent = `${remaining}초 후 자동으로 다음 라운드`;
-  nextRoundCountdownTimer = setInterval(() => {
+function renderNextRoundBox() {
+  const isHost = players.find(p => p.id === myId)?.is_host;
+  $('next-round-btn').hidden = !isHost;
+  $('next-round-hint').textContent = isHost ? '' : '방장이 다음 라운드로 넘길 때까지 기다려주세요.';
+}
+
+function renderCriminalAnswerKey(msg) {
+  const breakdown = (msg.score_breakdown || []).map(item => {
+    const pct = item.max > 0 ? Math.round((item.score / item.max) * 100) : 0;
+    return `<li>
+      <div class="cat-row"><span>${item.category}</span><span>${item.score} / ${item.max}</span></div>
+      <div class="cat-track"><div class="cat-fill" style="width:${pct}%"></div></div>
+    </li>`;
+  }).join('');
+  const answers = (msg.answer_key || []).map(a => `<li><b>${a.aspect}:</b> ${a.answer}</li>`).join('');
+  $('criminal-breakdown').innerHTML = breakdown;
+  $('criminal-answer-key').innerHTML = answers;
+  show('criminal-answer-panel');
+}
+
+// Composition-phase countdowns (crime writing / a guess) purely reflect
+// server-enforced time limits so players can pace themselves — the
+// server is what actually decides on timeout, this is just a clock.
+function startCrimeTimer(seconds) {
+  stopCrimeTimer();
+  let remaining = seconds;
+  const render = () => {
+    $('crime-timer').textContent = `⏱ 남은 시간: ${remaining}초`;
+    $('crime-timer').classList.toggle('warn', remaining <= 15);
+  };
+  render();
+  crimeTimerInterval = setInterval(() => {
     remaining--;
-    if (remaining <= 0) { stopNextRoundCountdown(); return; }
-    $('next-round-countdown').textContent = `${remaining}초 후 자동으로 다음 라운드`;
+    if (remaining < 0) { $('crime-timer').textContent = '⏱ 시간 초과'; stopCrimeTimer(); return; }
+    render();
   }, 1000);
 }
-function stopNextRoundCountdown() {
-  if (nextRoundCountdownTimer) { clearInterval(nextRoundCountdownTimer); nextRoundCountdownTimer = null; }
-  $('next-round-countdown').textContent = '';
+function stopCrimeTimer() {
+  if (crimeTimerInterval) { clearInterval(crimeTimerInterval); crimeTimerInterval = null; }
+  $('crime-timer').textContent = '';
+  $('crime-timer').classList.remove('warn');
+}
+
+function startGuessTimer(seconds) {
+  stopGuessTimer();
+  let remaining = seconds;
+  const render = () => {
+    $('guess-timer').textContent = `⏱ 남은 시간: ${remaining}초`;
+    $('guess-timer').classList.toggle('warn', remaining <= 10);
+  };
+  render();
+  guessTimerInterval = setInterval(() => {
+    remaining--;
+    if (remaining < 0) { $('guess-timer').textContent = '⏱ 시간 초과'; stopGuessTimer(); return; }
+    render();
+  }, 1000);
+}
+function stopGuessTimer() {
+  if (guessTimerInterval) { clearInterval(guessTimerInterval); guessTimerInterval = null; }
+  $('guess-timer').textContent = '';
+  $('guess-timer').classList.remove('warn');
 }
 
 function renderRoundResult(msg) {
@@ -544,6 +626,7 @@ $('restart-btn').onclick = () => send({ type: 'restart_game' });
 $('submit-crime-btn').onclick = () => {
   const text = $('crime-text').value.trim();
   if (!text) return;
+  stopCrimeTimer();
   send({ type: 'submit_crime', text });
   hide('crime-writing-box'); show('waiting-box');
   $('waiting-message').textContent = 'AI가 범행을 평가하는 중...';
@@ -555,16 +638,15 @@ $('submit-guess-btn').onclick = () => {
   // guess_pending round trip - the server still enforces this
   // authoritatively (a stale double-click can't corrupt whose turn it
   // is), this is purely for a snappier, no-flicker loading state.
+  stopGuessTimer();
   hide('guess-text'); hide('submit-guess-btn');
   show('guess-loading');
   send({ type: 'submit_guess', text });
 };
 $('next-turn-btn').onclick = () => {
-  stopAdvanceCountdown();
   send({ type: 'next_turn' });
 };
 $('next-round-btn').onclick = () => {
-  stopNextRoundCountdown();
   send({ type: 'next_round' });
 };
 

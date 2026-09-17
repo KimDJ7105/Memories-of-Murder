@@ -24,6 +24,19 @@ struct ScoreBreakdownItem {
     int max = 0;
 };
 
+// One aspect of the "official" reading of the crime — the same five
+// aspects a detective's guess is judged against (장소/무기/살해 방법/은닉
+// 장소/은닉 방법), but stating what the crime actually was rather than
+// judging a guess against it. Sent to the criminal only (see GameRoom's
+// `crime_answer_key` message) so they can understand *why* a detective's
+// guess was scored the way it was — playtesting found that even the
+// criminal often couldn't tell why their own crime was judged "유사"
+// instead of "일치" on some aspect without seeing this.
+struct AspectAnswer {
+    std::string aspect;
+    std::string answer;
+};
+
 // Structured output of an ICrimeEvaluator. `key_facts` is a best-effort
 // extraction used by IGuessJudge to compare a detective's guess against the
 // crime; it is a derived aid, not a substitute for `Crime::text`.
@@ -37,6 +50,9 @@ struct CrimeEvaluation {
     std::string evaluation;
     std::vector<std::string> key_facts;
     std::vector<ScoreBreakdownItem> breakdown;
+    // Always 5 entries in the fixed order 장소/무기/살해 방법/은닉 장소/은닉
+    // 방법 once populated by an evaluator.
+    std::vector<AspectAnswer> answer_key;
 };
 
 }

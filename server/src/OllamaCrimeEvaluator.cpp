@@ -28,6 +28,12 @@ constexpr CategorySpec kCategories[] = {
     {"증거/무기 은닉의 개연성", 15},
 };
 
+// The three aspects that aren't already deterministically known (장소/무기
+// come straight from Crime::location/weapon, extracted by exact substring
+// match — see GameData::extract_room_mention/extract_weapon_mention).
+// These need the model to actually read and summarize the free text.
+constexpr const char* kFreeformAspects[] = {"살해 방법", "은닉 장소", "은닉 방법"};
+
 std::string build_system_prompt(const GameData& data, const MapDef& map)
 {
     std::ostringstream rooms;
@@ -41,7 +47,7 @@ std::string build_system_prompt(const GameData& data, const MapDef& map)
     }
 
     std::ostringstream weapons;
-    for (const auto& w : data.weapons) weapons << "- " << w.name << "\n";
+    for (const auto& w : map.weapons) weapons << "- " << w.name << "\n";
 
     // Surveilled rooms are always-on risk zones (see docs/PROTOCOL.md
     // "감시 구역") — a static map property, never a time-of-day or patrol
@@ -72,6 +78,12 @@ std::string build_system_prompt(const GameData& data, const MapDef& map)
         if (i + 1 < std::size(kCategories)) breakdown_schema << ", ";
     }
 
+    std::ostringstream aspect_summary_schema;
+    for (size_t i = 0; i < std::size(kFreeformAspects); ++i) {
+        aspect_summary_schema << "\"" << kFreeformAspects[i] << "\":\"...\"";
+        if (i + 1 < std::size(kFreeformAspects)) aspect_summary_schema << ", ";
+    }
+
     std::ostringstream prompt;
     prompt <<
         "당신은 추리 게임 '살인의 추억'의 범행 평가관입니다.\n\n"
@@ -86,10 +98,15 @@ std::string build_system_prompt(const GameData& data, const MapDef& map)
         "\n각 항목마다 그 항목의 만점을 넘지 않는 정수 점수를 매기세요. 항목별 점수의 합이 "
         "최종 점수가 되므로, 전체적으로 몇 점을 주고 싶은지를 먼저 정한 뒤 그걸 다섯 항목에 "
         "억지로 나눠 맞추지 말고, 각 항목을 그 항목 자체의 기준으로 독립적으로 채점하세요.\n\n"
+        "또한 범인 본인이 나중에 참고할 수 있도록, 서술에서 실제로 어떤 내용이었는지를 다음 세 "
+        "항목 각각 한 문장으로 요약하세요 (탐정의 추리를 채점할 때 쓰는 것과 같은 항목입니다). "
+        "서술에 명시되지 않은 내용은 추측해서 채우지 말고 \"서술에 명시되지 않음\"이라고 쓰세요: "
+        "살해 방법, 은닉 장소(무엇을 어디에 숨겼는지), 은닉 방법(어떻게 숨겼는지).\n\n"
         "반드시 다음 JSON 형식으로만 응답하고 다른 텍스트는 포함하지 마세요:\n"
         "{\"breakdown\": [" << breakdown_schema.str() << "], "
         "\"evaluation\": \"한두 문장의 평가 이유\", "
-        "\"key_facts\": [\"범행의 핵심 사실을 나열한 문자열\", \"...\"]}\n"
+        "\"key_facts\": [\"범행의 핵심 사실을 나열한 문자열\", \"...\"], "
+        "\"aspect_summary\": {" << aspect_summary_schema.str() << "}}\n"
         "key_facts는 범인의 창의적인 세부 묘사(예: 흉기를 숨긴 구체적인 방법)를 뭉뚱그려 "
         "요약하지 말고, 사실 관계를 그대로 보존해서 나열하세요.";
     return prompt.str();
@@ -127,6 +144,7 @@ CrimeEvaluation fallback_evaluation(const std::string& reason)
     eval.breakdown = half_credit_breakdown();
     eval.score = sum_breakdown(eval.breakdown);
     eval.evaluation = "AI 평가에 실패하여 항목별 절반 점수가 적용되었습니다. (" + reason + ")";
+    for (const char* aspect : kFreeformAspects) eval.answer_key.push_back({aspect, "(AI 평가 실패로 확인 불가)"});
     return eval;
 }
 
@@ -185,6 +203,18 @@ CrimeEvaluation parse_evaluation(bool ok, const std::string& content)
         }
     }
 
+    const bool has_summary = j.contains("aspect_summary") && j.at("aspect_summary").is_object();
+    for (const char* aspect : kFreeformAspects) {
+        std::string answer = "(정보 없음)";
+        if (has_summary) {
+            const auto& summary = j.at("aspect_summary");
+            if (summary.contains(aspect) && summary.at(aspect).is_string()) {
+                answer = summary.at(aspect).get<std::string>();
+            }
+        }
+        eval.answer_key.push_back({aspect, answer});
+    }
+
     return eval;
 }
 
@@ -207,8 +237,15 @@ void OllamaCrimeEvaluator::evaluate(const Crime& crime, const MapDef& map, std::
 {
     auto client = std::make_shared<OllamaClient>(ioc_, host_, port_);
     client->chat_json(model_, build_system_prompt(data_, map), build_user_prompt(crime),
-        [on_done = std::move(on_done)](bool ok, std::string content) mutable {
-            on_done(parse_evaluation(ok, content));
+        [on_done = std::move(on_done), location = crime.location, weapon = crime.weapon]
+        (bool ok, std::string content) mutable {
+            CrimeEvaluation eval = parse_evaluation(ok, content);
+            // 장소/무기 are never asked of the model — they're already known
+            // exactly from the deterministic extraction in GameRoom, so
+            // prepend them here rather than risk the model contradicting a
+            // fact the server already settled.
+            eval.answer_key.insert(eval.answer_key.begin(), {{"장소", location}, {"무기", weapon}});
+            on_done(std::move(eval));
         });
 }
 

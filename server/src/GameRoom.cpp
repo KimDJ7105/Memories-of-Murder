@@ -16,10 +16,11 @@ constexpr int kMaxPlayers = 6;
 constexpr int kMaxAttempts = 3;
 constexpr double kAttemptMultipliers[kMaxAttempts] = {1.0, 0.9, 0.8};
 constexpr int kCorrectBonus = 10;
-constexpr int kTurnSeconds = 10;
-// Longer than kTurnSeconds since there's more to read here: the full
-// crime confession, the AI's evaluation, and everyone's score changes.
-constexpr int kNextRoundSeconds = 15;
+// Time limits on the two active composition phases (see the class
+// comment for why these exist but turn/round advancement doesn't have
+// timers of its own anymore).
+constexpr int kCrimeWritingSeconds = 90;
+constexpr int kGuessSeconds = 45;
 
 }
 
@@ -34,7 +35,7 @@ GameRoom::GameRoom(boost::asio::io_context& ioc,
     , evaluator_(std::move(evaluator))
     , judge_(std::move(judge))
     , rng_(std::random_device{}())
-    , turn_timer_(ioc)
+    , phase_timer_(ioc)
     , selected_map_(&data.default_map())
 {
 }
@@ -90,9 +91,10 @@ void GameRoom::handle_disconnect(int player_id)
     // Host succession applies here too, not just in Lobby: without it, a
     // host who disconnects mid-game leaves host_id_ pointing at a session
     // that will never come back (there's no reconnect feature), which
-    // permanently locks out host-only actions for whoever's left — most
-    // importantly restart_game, which only fires on an explicit host
-    // message and has no timer fallback the way next_round does.
+    // permanently locks out host-only actions for whoever's left —
+    // restart_game and next_round both only ever fire on an explicit host
+    // message now (no auto-advance timer backs either up), so a stuck
+    // host_id_ would strand the room for good.
     if (host_id_ == player_id) {
         auto it = std::find_if(players_.begin(), players_.end(),
                                 [](const Player& pl) { return pl.connected; });
@@ -105,7 +107,8 @@ void GameRoom::handle_disconnect(int player_id)
 
     if (player_id == criminal_id_ && round_in_progress) {
         sender_.broadcast({{"type", "error"}, {"message", "범인의 연결이 끊겨 라운드를 종료합니다."}});
-        if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+        phase_timer_.cancel();  // whichever of the crime-writing/guess timers might be pending
+        awaiting_advance_ = false;
         guess_in_flight_ = false;
         turn_generation_++;
         pending_order_.clear();
@@ -121,7 +124,8 @@ void GameRoom::handle_disconnect(int player_id)
                               pending_order_.end());
 
         if (was_current) {
-            if (awaiting_advance_) { turn_timer_.cancel(); awaiting_advance_ = false; }
+            phase_timer_.cancel();  // that detective's guess timer, if it was still pending
+            awaiting_advance_ = false;
             guess_in_flight_ = false;
             begin_next_turn();
             return;
@@ -254,7 +258,7 @@ nlohmann::json GameRoom::build_board_info() const
     for (const auto& [a, b] : map.edges) edges.push_back({a, b});
 
     nlohmann::json weapons = nlohmann::json::array();
-    for (const auto& w : data_.weapons) weapons.push_back({{"id", w.id}, {"name", w.name}});
+    for (const auto& w : map.weapons) weapons.push_back({{"id", w.id}, {"name", w.name}});
 
     nlohmann::json available_maps = nlohmann::json::array();
     for (const auto& m : data_.maps) available_maps.push_back({{"id", m.id}, {"name", m.name}});
@@ -310,7 +314,9 @@ void GameRoom::start_round()
 
     state_ = GameState::CrimeWriting;
 
-    sender_.broadcast({{"type", "round_start"}, {"round", round_number_}});
+    sender_.broadcast({{"type", "round_start"},
+                        {"round", round_number_},
+                        {"crime_writing_seconds", kCrimeWritingSeconds}});
 
     for (const auto& p : players_) {
         if (p.id == criminal_id_) {
@@ -320,7 +326,29 @@ void GameRoom::start_round()
         }
     }
 
+    schedule_crime_writing_timeout();
+
     broadcast_room_update();
+}
+
+void GameRoom::schedule_crime_writing_timeout()
+{
+    phase_timer_.expires_after(std::chrono::seconds(kCrimeWritingSeconds));
+    std::weak_ptr<char> alive = alive_;
+    phase_timer_.async_wait([this, alive](const boost::system::error_code& ec) {
+        if (ec) return;  // cancelled - the crime was submitted (or the round otherwise ended) in time
+        if (alive.expired()) return;  // room was torn down while this was pending
+        if (state_ != GameState::CrimeWriting) return;  // extra safety, shouldn't be reachable given cancel() above
+        handle_crime_writing_timeout();
+    });
+}
+
+void GameRoom::handle_crime_writing_timeout()
+{
+    sender_.broadcast({{"type", "error"}, {"message", "범인이 시간 내에 범행을 작성하지 못해 라운드를 종료합니다."}});
+    crime_eval_ = CrimeEvaluation{};
+    crime_eval_.evaluation = "범인이 시간 내에 범행을 작성하지 못했습니다.";
+    finish_round();
 }
 
 void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
@@ -344,7 +372,7 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
     // them consistent with the narrative by construction: there's no way
     // for the "official" weapon to disagree with what the text actually
     // describes, since it's read from the same text.
-    const WeaponDef* weapon = data_.extract_weapon_mention(text);
+    const WeaponDef* weapon = data_.extract_weapon_mention(*selected_map_, text);
     if (!weapon) {
         send_error(player_id, "범행 내용에 사용 가능한 흉기 이름을 포함해 주세요.");
         return;
@@ -354,6 +382,8 @@ void GameRoom::handle_submit_crime(int player_id, const nlohmann::json& msg)
         send_error(player_id, "범행 내용에 지도에 있는 구체적인 장소를 포함해 주세요.");
         return;
     }
+
+    phase_timer_.cancel();  // submitted in time, no need for the crime-writing timeout anymore
 
     crime_text_ = text;
     crime_weapon_ = weapon->name;
@@ -390,6 +420,21 @@ void GameRoom::run_ai_judging()
         // criminal and the detectives use it to gauge the stakes before
         // investigation starts.
         sender_.broadcast({{"type", "crime_score_revealed"}, {"score", crime_eval_.score}});
+
+        // The criminal alone gets the full breakdown: playtesting found
+        // that even the criminal often couldn't tell why a detective's
+        // guess was judged "유사" instead of "일치" on some aspect without
+        // seeing how the AI itself read their own crime. Sent privately
+        // (sender_.send, not broadcast) so detectives never see it —
+        // otherwise this would just hand them the answer.
+        nlohmann::json answer_key_json = nlohmann::json::array();
+        for (const auto& a : crime_eval_.answer_key) {
+            answer_key_json.push_back({{"aspect", a.aspect}, {"answer", a.answer}});
+        }
+        sender_.send(criminal_id_, {{"type", "crime_answer_key"},
+                                     {"answer_key", answer_key_json},
+                                     {"score_breakdown", build_score_breakdown_json()}});
+
         start_investigation();
     });
 }
@@ -425,8 +470,10 @@ void GameRoom::begin_next_turn()
 
     sender_.broadcast({{"type", "investigation_turn_start"},
                {"detective_id", current_detective_},
-               {"attempt", attempt_number}});
+               {"attempt", attempt_number},
+               {"guess_seconds", kGuessSeconds}});
     broadcast_room_update();
+    schedule_guess_timeout();
 }
 
 void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
@@ -455,6 +502,7 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
     // rejected by the check above, not allowed to start a second judging
     // call for the same turn.
     guess_in_flight_ = true;
+    phase_timer_.cancel();  // submitted in time, no need for the guess timeout anymore
     sender_.send(player_id, {{"type", "guess_pending"}});
     const int generation = turn_generation_;
     std::weak_ptr<char> alive = alive_;
@@ -504,29 +552,72 @@ void GameRoom::handle_submit_guess(int player_id, const nlohmann::json& msg)
                    {"attempt", attempts_used_[player_id]},
                    {"aspects", aspects_json}});
 
+        // No auto-advance timer: the answering detective (or the host)
+        // sends next_turn explicitly whenever they're ready.
         awaiting_advance_ = true;
-        schedule_turn_advance();
     });
 }
 
-void GameRoom::schedule_turn_advance()
+void GameRoom::schedule_guess_timeout()
 {
-    turn_timer_.expires_after(std::chrono::seconds(kTurnSeconds));
-    turn_timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec) return;
-        if (!awaiting_advance_) return;
-        awaiting_advance_ = false;
-        begin_next_turn();
+    phase_timer_.expires_after(std::chrono::seconds(kGuessSeconds));
+    const int generation = turn_generation_;
+    std::weak_ptr<char> alive = alive_;
+    phase_timer_.async_wait([this, generation, alive](const boost::system::error_code& ec) {
+        if (ec) return;  // cancelled - a guess was submitted (or the round moved on) in time
+        if (alive.expired()) return;  // room was torn down while this was pending
+        if (generation != turn_generation_) return;  // turn already moved on for some other reason
+        if (guess_in_flight_ || awaiting_advance_) return;  // already submitted/being judged/already answered
+        handle_guess_timeout();
     });
+}
+
+void GameRoom::handle_guess_timeout()
+{
+    const int player_id = current_detective_;
+    attempts_used_[player_id] = attempts_used_[player_id] + 1;
+    pending_order_.pop_front();
+    if (attempts_used_[player_id] < kMaxAttempts) {
+        pending_order_.push_back(player_id);
+    }
+
+    // Synthesized exactly as a real "no content in the guess" verdict
+    // would come back from the judge (see OllamaGuessJudge's own rule for
+    // that case) — timing out is just an extreme case of submitting
+    // nothing.
+    const nlohmann::json aspects_json = nlohmann::json::array({
+        {{"aspect", "장소"}, {"verdict", "불일치"}},
+        {{"aspect", "무기"}, {"verdict", "불일치"}},
+        {{"aspect", "살해 방법"}, {"verdict", "불일치"}},
+        {{"aspect", "은닉 장소"}, {"verdict", "불일치"}},
+        {{"aspect", "은닉 방법"}, {"verdict", "불일치"}},
+    });
+
+    log_ai_test_event({{"type", "guess_timeout"},
+                        {"round", round_number_},
+                        {"player_id", player_id},
+                        {"attempt", attempts_used_[player_id]}});
+
+    sender_.broadcast({{"type", "guess_feedback"},
+               {"player_id", player_id},
+               {"guess_text", ""},
+               {"timed_out", true},
+               {"correct", false},
+               {"attempt", attempts_used_[player_id]},
+               {"aspects", aspects_json}});
+
+    // Same manual-only advance as a real answer — see the class comment.
+    // The absent detective won't be the one to click it, but the host can.
+    awaiting_advance_ = true;
 }
 
 void GameRoom::handle_next_turn(int player_id)
 {
-    if (state_ != GameState::Investigation || !awaiting_advance_ || player_id != current_detective_) {
+    if (state_ != GameState::Investigation || !awaiting_advance_ ||
+        (player_id != current_detective_ && player_id != host_id_)) {
         send_error(player_id, "지금은 다음 차례로 넘길 수 없습니다.");
         return;
     }
-    turn_timer_.cancel();
     awaiting_advance_ = false;
     begin_next_turn();
 }
@@ -557,14 +648,9 @@ void GameRoom::finish_round()
     for (const auto& [id, amount] : gained) gained_json[std::to_string(id)] = amount;
 
     // The per-category breakdown (like `evaluation` and `key_facts`) is
-    // withheld until round_result, same as the rest of the AI's reasoning
-    // — showing it earlier via crime_score_revealed could hint at aspects
-    // of the crime before detectives finish investigating.
-    nlohmann::json breakdown_json = nlohmann::json::array();
-    for (const auto& item : crime_eval_.breakdown) {
-        breakdown_json.push_back({{"category", item.category}, {"score", item.score}, {"max", item.max}});
-    }
-
+    // withheld from everyone but the criminal until round_result — see
+    // run_ai_judging's private crime_answer_key message for why the
+    // criminal already saw it earlier.
     sender_.broadcast({{"type", "round_result"},
                {"round", round_number_},
                {"criminal_id", criminal_id_},
@@ -573,7 +659,7 @@ void GameRoom::finish_round()
                {"location", crime_location_name_},
                {"location_id", crime_location_id_},
                {"crime_score", crime_eval_.score},
-               {"score_breakdown", breakdown_json},
+               {"score_breakdown", build_score_breakdown_json()},
                {"evaluation", crime_eval_.evaluation},
                {"key_facts", crime_eval_.key_facts},
                {"scores_gained", gained_json},
@@ -594,20 +680,11 @@ void GameRoom::finish_round()
     // Wait here instead of immediately starting the next round, so players
     // actually have time to read round_result's reveal (the crime, the
     // score, who solved it) rather than it flashing by as the next
-    // round's round_start/your_role messages instantly hide it.
+    // round's round_start/your_role messages instantly hide it. No
+    // auto-advance timer — only the host's explicit next_round moves on
+    // (see the class comment for why).
     state_ = GameState::NextRound;
     broadcast_room_update();
-    schedule_next_round_advance();
-}
-
-void GameRoom::schedule_next_round_advance()
-{
-    turn_timer_.expires_after(std::chrono::seconds(kNextRoundSeconds));
-    turn_timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec) return;
-        if (state_ != GameState::NextRound) return;
-        start_round();
-    });
 }
 
 void GameRoom::handle_next_round(int player_id)
@@ -620,8 +697,16 @@ void GameRoom::handle_next_round(int player_id)
         send_error(player_id, "방장만 다음 라운드로 넘길 수 있습니다.");
         return;
     }
-    turn_timer_.cancel();
     start_round();
+}
+
+nlohmann::json GameRoom::build_score_breakdown_json() const
+{
+    nlohmann::json breakdown_json = nlohmann::json::array();
+    for (const auto& item : crime_eval_.breakdown) {
+        breakdown_json.push_back({{"category", item.category}, {"score", item.score}, {"max", item.max}});
+    }
+    return breakdown_json;
 }
 
 nlohmann::json GameRoom::build_room_update() const

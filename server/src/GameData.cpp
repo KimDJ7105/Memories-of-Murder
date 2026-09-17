@@ -84,7 +84,7 @@ std::string load_image_as_data_uri(const std::filesystem::path& path)
     return "data:" + mime_type_for(path) + ";base64," + base64_encode(buf.str());
 }
 
-MapDef parse_map(const nlohmann::json& j, const std::filesystem::path& maps_dir)
+MapDef parse_map(const nlohmann::json& j, const std::filesystem::path& maps_dir, const std::vector<WeaponDef>& all_weapons)
 {
     MapDef map;
     map.id = j.value("id", "");
@@ -106,6 +106,19 @@ MapDef parse_map(const nlohmann::json& j, const std::filesystem::path& maps_dir)
     }
     for (const auto& e : j.at("edges")) {
         map.edges.emplace_back(e.at(0).get<std::string>(), e.at(1).get<std::string>());
+    }
+
+    if (j.contains("weapons") && j.at("weapons").is_array()) {
+        for (const auto& wid : j.at("weapons")) {
+            const std::string id = wid.get<std::string>();
+            auto it = std::find_if(all_weapons.begin(), all_weapons.end(),
+                                    [&](const WeaponDef& w) { return w.id == id; });
+            if (it != all_weapons.end()) map.weapons.push_back(*it);
+        }
+    } else {
+        // No per-map list specified -> every weapon is available, so a map
+        // JSON that doesn't care about thematic fit needs no changes.
+        map.weapons = all_weapons;
     }
     return map;
 }
@@ -157,11 +170,11 @@ const RoomDef* GameData::extract_room_mention(const MapDef& map, const std::stri
     return best;
 }
 
-const WeaponDef* GameData::extract_weapon_mention(const std::string& text) const
+const WeaponDef* GameData::extract_weapon_mention(const MapDef& map, const std::string& text) const
 {
     const WeaponDef* best = nullptr;
     std::string::size_type best_pos = std::string::npos;
-    for (const auto& w : weapons) {
+    for (const auto& w : map.weapons) {
         const auto pos = text.find(w.name);
         if (pos != std::string::npos && pos < best_pos) {
             best_pos = pos;
@@ -177,15 +190,18 @@ GameData GameData::load_default()
     const std::filesystem::path maps_dir = base / "maps";
 
     GameData data;
+    // Weapons load first: parse_map resolves each map's "weapons" id list
+    // against this canonical set, so the set has to already exist.
+    data.weapons = parse_weapons(load_json_file(base / "weapons.json"));
+
     for (const auto& entry : std::filesystem::directory_iterator(maps_dir)) {
         if (entry.path().extension() != ".json") continue;
-        data.maps.push_back(parse_map(load_json_file(entry.path()), maps_dir));
+        data.maps.push_back(parse_map(load_json_file(entry.path()), maps_dir, data.weapons));
     }
     if (data.maps.empty()) {
         throw std::runtime_error("사용 가능한 지도가 없습니다: " + maps_dir.string());
     }
 
-    data.weapons = parse_weapons(load_json_file(base / "weapons.json"));
     return data;
 }
 

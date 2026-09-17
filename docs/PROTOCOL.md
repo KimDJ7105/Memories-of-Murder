@@ -12,9 +12,9 @@
 | `start_game` | - | 방장만 가능, Lobby에서 3~6명일 때만 허용 |
 | `restart_game` | - | 방장만 가능, `GameOver` 상태에서만 허용. 같은 방·같은 플레이어로 점수/범인 이력을 초기화하고 Lobby로 되돌린다 (연결이 끊긴 플레이어는 이때 제거됨). 이후 다시 `start_game`을 보내면 새 게임이 시작된다 |
 | `submit_crime` | `text` | 범인만, `CrimeWriting` 상태에서만 허용. 장소·흉기 모두 별도 필드가 아니라 `text` 안에 지도의 방 이름 / 흉기 목록의 이름을 자연스럽게 포함해서 써야 함 — 서버가 문장에서 둘 다 찾아낸다 (`GameData::extract_room_mention`/`extract_weapon_mention`). 범인은 UI에서 클릭으로 고르는 것이 하나도 없다 |
-| `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용. 이전 제출이 아직 AI 판정 중이면(`guess_pending`을 받은 뒤 `guess_feedback`이 오기 전) 거부됨 |
-| `next_turn` | - | 방금 추리를 제출한 탐정 본인만, 10초 자동 전환을 기다리지 않고 바로 다음 차례로 넘길 때 |
-| `next_round` | - | 방장만 가능, `NextRound` 상태에서만 허용. 15초 자동 전환을 기다리지 않고 바로 다음 라운드로 넘길 때 |
+| `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용. 이전 제출이 아직 AI 판정 중이면(`guess_pending`을 받은 뒤 `guess_feedback`이 오기 전) 거부됨. `kGuessSeconds`(45초) 안에 제출하지 않으면 서버가 자동으로 오답 처리한다 |
+| `next_turn` | - | 방금 추리를 제출한 탐정 본인 또는 방장만, `guess_feedback`이 온 뒤(`awaiting_advance_`)에만 허용. 자동 전환 타이머는 없음 — 방장을 허용하는 건 답변자가 자리를 비웠을 때 게임이 멈추지 않게 하기 위한 대비책 |
+| `next_round` | - | 방장만 가능, `NextRound` 상태에서만 허용. 자동 전환 타이머는 없음 |
 
 ## Server → Client
 
@@ -22,19 +22,20 @@
 |---|---|---|
 | `room_created` | `room_code`, `player_id` | `create_room` 성공 응답. 이 방 코드를 다른 플레이어에게 알려줘야 같이 플레이할 수 있다 |
 | `joined` | `room_code`, `player_id` | `join_room` 성공 응답 |
-| `board_info` | `available_maps[{id,name}]`, `map{id,name,image,surveillance_label}`, `rooms[{id,name,surveilled}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null. `surveillance_label`은 이 지도의 감시 시스템을 부르는 이름("CCTV", "당직 선원" 등)이고 그런 시스템이 없는 지도면 null. `rooms[].surveilled`가 true인 방은 항상 감시되는 위험 구역이며(로비 때부터 공개된 정보), 지도 이미지에도 표시되어 있다 |
+| `board_info` | `available_maps[{id,name}]`, `map{id,name,image,surveillance_label}`, `rooms[{id,name,surveilled}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null. `surveillance_label`은 이 지도의 감시 시스템을 부르는 이름("CCTV", "당직 선원" 등)이고 그런 시스템이 없는 지도면 null. `rooms[].surveilled`가 true인 방은 항상 감시되는 위험 구역이며(로비 때부터 공개된 정보), 지도 이미지에도 표시되어 있다. `weapons`는 전체 흉기 목록이 아니라 **이 지도에서만 쓸 수 있는 흉기 부분집합**이다 |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
-| `round_start` | `round` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음 |
+| `round_start` | `round`, `crime_writing_seconds` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음. `crime_writing_seconds`는 범인이 범행을 작성할 수 있는 제한 시간(초) — 클라이언트가 카운트다운을 보여주기 위한 값일 뿐, 실제 마감은 서버가 별도로 강제한다 |
 | `your_role` | `role` (`criminal`\|`detective`) | 각 플레이어에게 개별 전송, 범인 여부는 본인만 앎 |
-| `crime_score_revealed` | `score` | 범행 평가가 끝나자마자(탐정 조사가 시작되기 전) 점수만 전원에게 공개. 평가 이유·key_facts는 정답의 힌트가 될 수 있어 `round_result`까지 비공개 |
-| `investigation_turn_start` | `detective_id`, `attempt` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회) |
+| `crime_score_revealed` | `score` | 범행 평가가 끝나자마자(탐정 조사가 시작되기 전) 점수만 전원에게 공개. 평가 이유·key_facts·항목별 정답은 정답의 힌트가 될 수 있어 `round_result`까지 비공개 (범인 본인은 예외 — 바로 아래 `crime_answer_key` 참고) |
+| `crime_answer_key` | `answer_key[{aspect,answer}]`, `score_breakdown[]` | **범인에게만** 개별 전송(`crime_score_revealed` 직후). `guess_feedback`의 판정이 왜 "유사"나 "불일치"로 나오는지 범인 스스로도 이해할 수 있도록, AI가 범행을 어떻게 읽었는지를 판정과 동일한 다섯 항목(장소/무기/살해 방법/은닉 장소/은닉 방법)으로 보여준다. 장소·무기는 서버가 이미 확정적으로 아는 값을 그대로 넣고, 나머지 세 항목은 AI가 서술을 요약한 문장이다. `score_breakdown`은 아래 설명과 같은 형태 |
+| `investigation_turn_start` | `detective_id`, `attempt`, `guess_seconds` | 이번에 추리할 차례인 탐정과, 그 탐정의 몇 번째 시도인지 (탐정마다 최대 3회). `guess_seconds`는 그 탐정이 추리를 제출할 수 있는 제한 시간(초) |
 | `guess_pending` | - | 방금 제출한 탐정 본인에게만: AI가 판정 중이라는 뜻. 판정이 끝날 때까지 그 탐정은 재제출할 수 없다 |
-| `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]` | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 장소"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. "은닉 장소"(어디에 숨겼는지)와 "은닉 방법"(어떻게 숨겼는지)은 서로 다른 항목. 전원에게 공개 |
-| `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `score_breakdown[]`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨) |
+| `guess_feedback` | `player_id`, `guess_text`, `correct`, `attempt`, `aspects[{aspect,verdict}]`, `timed_out`? | 방금 제출된 추리에 대한 판정. `aspects`는 "장소"/"무기"/"살해 방법"/"은닉 장소"/"은닉 방법" 각각의 `일치`/`유사`/`불일치`. "은닉 장소"(어디에 숨겼는지)와 "은닉 방법"(어떻게 숨겼는지)은 서로 다른 항목. 전원에게 공개. `timed_out`이 true면 실제 제출이 아니라 제한 시간 초과로 서버가 강제로 오답 처리한 것(`guess_text`는 빈 문자열) |
+| `round_result` | `criminal_id`, `crime_text`, `weapon`, `location`, `location_id`, `crime_score`, `score_breakdown[]`, `evaluation`, `key_facts[]`, `scores_gained{}`, `total_scores{}` | 라운드 종료 결과 (이때 장소·무기가 공식적으로 공개됨). 범인이 시간 내에 범행을 제출하지 못해 종료된 라운드는 `crime_text`/`weapon`/`location`이 빈 문자열이고 `evaluation`이 그 사실을 설명한다 |
 | `game_over` | `total_scores{}`, `winner_id` | 전원이 한 번씩 범인을 마친 후 |
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
 
-`score_breakdown`은 `[{"category": "장소/환경 일치성", "score": 20, "max": 25}, ...]` 형태의 배열로, `docs/DESIGN.md` 7장의 평가 기준 다섯 항목(장소/환경 일치성 25점, 이동 및 실행 가능성 20점, 무기 사용의 개연성 20점, 범행 과정의 개연성 20점, 증거/무기 은닉의 개연성 15점)을 항상 이 순서 그대로 담는다. `crime_score`는 이 다섯 항목 점수의 합과 항상 정확히 일치한다 — AI가 총점을 별도로 지어내지 않고 서버가 `score_breakdown`을 합산해서 계산하기 때문(`OllamaCrimeEvaluator::parse_evaluation` 참고). `score_breakdown` 역시 `evaluation`/`key_facts`와 마찬가지로 `crime_score_revealed`가 아니라 `round_result`에서만 공개된다.
+`score_breakdown`은 `[{"category": "장소/환경 일치성", "score": 20, "max": 25}, ...]` 형태의 배열로, `docs/DESIGN.md` 7장의 평가 기준 다섯 항목(장소/환경 일치성 25점, 이동 및 실행 가능성 20점, 무기 사용의 개연성 20점, 범행 과정의 개연성 20점, 증거/무기 은닉의 개연성 15점)을 항상 이 순서 그대로 담는다. `crime_score`는 이 다섯 항목 점수의 합과 항상 정확히 일치한다 — AI가 총점을 별도로 지어내지 않고 서버가 `score_breakdown`을 합산해서 계산하기 때문(`OllamaCrimeEvaluator::parse_evaluation` 참고). `score_breakdown`은 범인에게는 `crime_answer_key`로 먼저 공개되고, 나머지 전원에게는 `round_result`에서만 공개된다.
 
 ## 여러 방 운영 (RoomManager)
 
@@ -50,23 +51,36 @@
 Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Result → NextRound → (다음 라운드 | GameOver)
 ```
 
-`RoleAssignment`/`AIJudging`/`Result`는 서버가 즉시 통과시키는 내부 상태다. `NextRound`는 예외로, `round_result`를 보낸 뒤 곧장 다음 라운드로 넘어가지 않고 실제로 15초(또는 방장의 `next_round`) 동안 이 상태에 머문다 — 그러지 않으면 결과 화면이 뜨자마자 다음 라운드의 `round_start`가 도착해 읽을 새도 없이 사라진다. 클라이언트가 실제로 입력을 보내야 하는 상태는 `CrimeWriting`, `Investigation`, `NextRound`(방장만) 세 가지다.
+`RoleAssignment`/`AIJudging`/`Result`는 서버가 즉시 통과시키는 내부 상태다. `NextRound`는 예외로, `round_result`를 보낸 뒤 곧장 다음 라운드로 넘어가지 않고 방장이 `next_round`를 보낼 때까지 이 상태에 머문다 — 그러지 않으면 결과 화면이 뜨자마자 다음 라운드의 `round_start`가 도착해 읽을 새도 없이 사라진다. 클라이언트가 실제로 입력을 보내야 하는 상태는 `CrimeWriting`, `Investigation`, `NextRound`(방장만) 세 가지다.
+
+**자동 진행 타이머는 없다.** 플레이테스트에서 다들 다 읽기도 전에 다음 화면으로 넘어가는 일이 계속 발생해서, "다 읽으면 직접 버튼을 누른다"는 방식으로 완전히 바꿨다 — `next_turn`/`next_round` 둘 다 순수하게 수동이다. 대신 답변자가 자리를 비워 아무도 못 누르는 상황을 막기 위해 `next_turn`은 방장도 보낼 수 있다(`next_round`는 원래도 방장 전용이라 문제없음). 반대로 **입력을 실제로 작성하는 두 구간**(범행 서술, 추리 서술)에는 시간 제한을 새로 뒀다 — 이건 "다 읽었으니 넘어가자"가 아니라 "너무 오래 끌지 말자"는 반대 방향의 문제라 별도로 다룬다.
 
 ## Investigation은 턴제
 
 탐정들은 동시에 제출하지 않고 한 명씩 순서대로 추리한다 (매 라운드 시작 시 순서를 셔플).
 
-1. 서버가 `investigation_turn_start`로 현재 차례의 탐정을 알림
-2. 그 탐정이 `submit_guess` 전송
+1. 서버가 `investigation_turn_start`로 현재 차례의 탐정과 제한 시간(`guess_seconds`)을 알림
+2. 그 탐정이 시간 안에 `submit_guess`를 보내거나, 시간을 넘기면 서버가 자동으로 오답(`guess_feedback`에 `timed_out: true`) 처리
 3. 서버가 즉시 판정 후 `guess_feedback`을 전원에게 브로드캐스트 (정답/오답 + 항목별 근접도)
-4. 방금 답한 탐정이 `next_turn`을 보내거나, 10초가 지나면 서버가 자동으로 다음 차례로 진행
+4. 방금 답한 탐정 본인 또는 방장이 `next_turn`을 보내야 다음 차례로 진행 (자동 진행 없음)
 5. 정답을 맞혔거나 3회 시도를 다 쓴 탐정은 순번에서 빠지고, 아직 남은 탐정이 있으면 계속 진행. 아무도 안 남으면 라운드 종료
 
 원래 설계(섹션 11)의 "한 라운드 = 판정 1회" 배치 최적화 대신, 턴마다 즉시 피드백을 주기 위해 추리 1건당 판정 1회로 바꾼 것 — 응답성을 우선한 의도적 트레이드오프.
 
+## 시간 제한 (범행 작성 / 추리 작성)
+
+범행 작성(`CrimeWriting`)과 추리 작성(각 `Investigation` 턴)은 각각 90초/45초의 서버 시행 제한 시간을 가진다 (`GameRoom.cpp`의 `kCrimeWritingSeconds`/`kGuessSeconds`). 시간 안에 제출하면 타이머가 취소되고 정상 진행되며, 시간을 넘기면:
+
+- **범행 작성 시간 초과**: 그 라운드는 범행 없이 즉시 종료된다. `round_result`에 빈 `crime_text`/`weapon`/`location`과 "범인이 시간 내에 범행을 작성하지 못했습니다"라는 `evaluation`이 담기고, 범인은 0점을 받는다.
+- **추리 작성 시간 초과**: 그 시도는 5개 항목 모두 `불일치`인 오답으로 자동 처리된다 (`guess_feedback`에 `timed_out: true`). 이후 흐름은 실제로 틀린 답을 제출했을 때와 완전히 동일 — 시도 횟수가 소진됐으면 순번에서 빠지고, 아니면 다시 대기열에 들어간다.
+
+둘 다 "제출을 안 하면 게임이 멈춘다"는 문제를 막기 위한 장치이고, 위 "자동 진행 타이머는 없다" 항목과는 반대 방향의 문제(느긋하게 읽을 시간 vs. 무한정 끌 수 없는 시간)를 다룬다는 점에 유의.
+
 ## 지도와 흉기는 정적 데이터, 서버가 고르지 않는다
 
 장소와 흉기 둘 다 서버가 라운드마다 무작위로 배정하지 않는다. `board_info`로 전달되는 지도(방 목록 + 인접 관계)와 흉기 목록은 라운드 사이에는 변하지 않는 보드 상태다(방장이 Lobby에서 `select_map`으로 지도 자체를 바꾸는 것과는 별개). 범인은 장소든 흉기든 UI로 고르는 게 하나도 없다 — 범행을 자연어로 쓸 때 지도에 있는 방 이름과 흉기 목록의 이름을 문장에 자연스럽게 포함하면, 서버가 그 문장에서 둘 다 찾아낸다(`GameData::extract_room_mention`/`extract_weapon_mention`, 문장에서 가장 먼저 등장하는 이름을 채택). 둘 중 하나라도 언급되지 않은 범행은 `error`로 거부된다. 그래서 장소·무기 모두 `round_result`가 오기 전까지는 비공개다.
+
+흉기 목록은 전체 게임에서 하나만 있는 게 아니라 **지도마다 다른 부분집합**을 쓴다(아래 "지도는 코드가 아니라 파일" 참고) — 플레이테스트에서 모든 지도에 같은 흉기 6종이 다 있으니 "이 흉기가 왜 여기에?" 싶은 조합(예: 학교에 총, 유람선에 촛대)이 나온다는 피드백을 받고 나눴다. `extract_weapon_mention`도 전체 흉기 목록이 아니라 그 방의 지도가 실제로 제공하는 흉기 목록 안에서만 찾는다.
 
 (한때는 흉기만 클릭으로 고르는 선택지를 따로 뒀었는데, 문장에 그 흉기를 실제로 언급하지 않아도 통과되는 바람에 "선택한 흉기"와 "실제 서술 내용"이 어긋나는 문제가 있었다. 장소와 완전히 같은 방식으로 텍스트에서 추출하도록 통일해 이 불일치 자체를 없앴다.)
 
@@ -83,10 +97,14 @@ Lobby → RoleAssignment → CrimeWriting → AIJudging → Investigation → Re
   "id": "mansion",
   "name": "낡은 저택",
   "image": "mansion.svg",
+  "surveillance_label": "CCTV",
+  "weapons": ["knife", "blunt", "rope", "poison", "gun", "candlestick"],
   "rooms": [{"id": "attic", "name": "다락방"}, ...],
   "edges": [["attic", "library"], ...]
 }
 ```
+
+`weapons`는 `server/data/weapons.json`에 정의된 흉기 id 중 이 지도에서 실제로 쓸 것만 골라 담은 목록이다. 필드 자체를 생략하면(예: 앞으로 추가되는 지도가 신경 쓰지 않는 경우) 전체 흉기가 전부 허용된다 — 기존 동작과 호환.
 
 지도 데이터 자체는 방 목록(`id`, `name`)과 연결 관계(`edges`)뿐이다 — 화면에 그리기 위한 좌표는 들어있지 않다 (좌표를 넣었다가 아무 기능도 쓰지 않길래 도로 뺀 적이 있다 — git log 참고). `image`는 지도와 같은 폴더에 있는 이미지 파일 이름(`mansion.svg`처럼)을 가리키고, `GameData`가 서버 시작 시 그 파일을 딱 한 번 읽어서 base64 `data:` URI로 인코딩해 메모리에 들고 있는다 — 매 요청마다 다시 읽거나 인코딩하지 않고, `board_info`를 보낼 때 이미 완성된 문자열을 그대로 끼워 넣기만 한다. 이 방식 덕분에 이미지 하나 보여주자고 별도의 HTTP 정적 파일 서버를 둘 필요가 없다 (지금 서버는 WebSocket 하나뿐이다). 확장자로 MIME 타입을 판단하므로(`.svg`→`image/svg+xml`, `.png`→`image/png` 등) 나중에 실제 손그림/AI 생성 PNG로 바꾸고 싶으면 그 확장자의 파일로 교체하고 JSON의 `image` 값만 바꾸면 된다 — 코드 변경 없음.
 

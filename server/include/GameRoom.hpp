@@ -45,14 +45,24 @@ namespace mom {
 //
 // Investigation is turn-based: detectives take one guess at a time in a
 // rotating queue (`pending_order_`), each guess gets immediate public
-// feedback, and the turn advances either when the answering detective
-// sends `next_turn` or after a 10s server-side timer fires — whichever
-// comes first.
+// feedback, and the turn advances only when the answering detective (or
+// the host, as a fallback if that detective has wandered off) explicitly
+// sends `next_turn` — there is deliberately no auto-advance timer here.
+// An earlier version auto-advanced after a fixed number of seconds, but
+// playtesting found players constantly got cut off mid-read; forcing a
+// manual click, with the host able to nudge things along, fixed that.
 //
 // After a round ends, GameRoom sits in GameState::NextRound (rather than
 // immediately starting the next round) so players actually have time to
-// read round_result's reveal — the host can send `next_round` to move on
-// early, or a longer server-side timer does it automatically.
+// read round_result's reveal — only the host's `next_round` moves it on,
+// again with no timer.
+//
+// What *does* have a time limit is the active composition phases
+// (writing the crime, writing a guess) — `phase_timer_` enforces
+// kCrimeWritingSeconds / kGuessSeconds so an idle criminal or detective
+// can't stall the game indefinitely; letting someone read as long as they
+// want and forcing someone to act within a time limit are different
+// problems with different fixes.
 class GameRoom {
 public:
     GameRoom(boost::asio::io_context& ioc,
@@ -100,15 +110,23 @@ private:
     void run_ai_judging();
     void start_investigation();
     void begin_next_turn();
-    void schedule_turn_advance();
 
     void finish_round();
-    void schedule_next_round_advance();
 
     nlohmann::json build_room_update() const;
     void broadcast_room_update();
+    nlohmann::json build_score_breakdown_json() const;
     void send_error(int player_id, const std::string& message);
     Player* find_player(int player_id);
+
+    // Composition-phase time limits. Both start `phase_timer_`, which is
+    // cancelled the moment the relevant player submits — so a real,
+    // in-time submission never races with these; the only way either
+    // fires is genuine inaction.
+    void schedule_crime_writing_timeout();
+    void handle_crime_writing_timeout();
+    void schedule_guess_timeout();
+    void handle_guess_timeout();
 
     boost::asio::io_context& ioc_;
     const GameData& data_;
@@ -116,7 +134,11 @@ private:
     std::unique_ptr<ICrimeEvaluator> evaluator_;
     std::unique_ptr<IGuessJudge> judge_;
     std::mt19937 rng_;
-    boost::asio::steady_timer turn_timer_;
+    // Single timer reused for whichever composition phase is currently
+    // active (crime-writing or one detective's guess) — the two never
+    // overlap, so one timer object is enough. Submitting in time cancels
+    // it; letting it expire triggers the corresponding timeout handler.
+    boost::asio::steady_timer phase_timer_;
 
     GameState state_ = GameState::Lobby;
     std::vector<Player> players_;
@@ -147,8 +169,9 @@ private:
     // second concurrent judging call for the same turn, which would pop
     // pending_order_ twice and corrupt whose turn it is.
     bool guess_in_flight_ = false;
-    // True from when guess_feedback has been shown until next_turn/the
-    // 10s timer actually advances the turn.
+    // True from when guess_feedback has been shown until next_turn (from
+    // the answering detective or the host) actually advances the turn —
+    // no timer involved, purely a manual gate (see the class comment).
     bool awaiting_advance_ = false;
     // Bumped whenever the turn/round moves on independently of a pending
     // AI call (begin_next_turn, a new round, or a criminal disconnect

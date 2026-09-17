@@ -3,6 +3,7 @@
   "name": "심야의 학교",
   "image": "school.svg",
   "surveillance_label": "CCTV",
+  "weapons": ["knife", "blunt", "rope", "poison"],
   "rooms": [
     {"id": "science_lab", "name": "과학실"},
     {"id": "classroom", "name": "교실", "surveilled": true},
