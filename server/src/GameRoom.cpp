@@ -22,6 +22,28 @@ constexpr int kCorrectBonus = 10;
 constexpr int kCrimeWritingSeconds = 90;
 constexpr int kGuessSeconds = 45;
 
+// 32 hex characters (128 bits) — see docs/RECONNECT_DESIGN.md for what
+// this token is and isn't meant to defend against. Massive overkill for
+// the actual threat model (a friend guessing a small player_id), but
+// generating a few extra random hex digits costs nothing.
+std::string generate_token(std::mt19937& rng)
+{
+    static const char kHex[] = "0123456789abcdef";
+    std::uniform_int_distribution<int> dist(0, 15);
+    std::string token;
+    token.reserve(32);
+    for (int i = 0; i < 32; ++i) token += kHex[dist(rng)];
+    return token;
+}
+
+const Player* find_player_const(const std::vector<Player>& players, int player_id)
+{
+    for (const auto& p : players) {
+        if (p.id == player_id) return &p;
+    }
+    return nullptr;
+}
+
 }
 
 GameRoom::GameRoom(boost::asio::io_context& ioc,
@@ -61,12 +83,33 @@ int GameRoom::handle_join(const std::string& name)
     Player p;
     p.id = next_player_id_++;
     p.name = name.empty() ? ("Player" + std::to_string(p.id)) : name;
+    p.token = generate_token(rng_);
     players_.push_back(p);
 
     if (host_id_ == -1) host_id_ = p.id;
 
     broadcast_room_update();
     return p.id;
+}
+
+std::string GameRoom::player_token(int player_id) const
+{
+    const Player* p = find_player_const(players_, player_id);
+    return p ? p->token : std::string();
+}
+
+bool GameRoom::verify_rejoin(int player_id, const std::string& token) const
+{
+    const Player* p = find_player_const(players_, player_id);
+    return p && !token.empty() && p->token == token;
+}
+
+void GameRoom::handle_reconnect(int player_id)
+{
+    Player* p = find_player(player_id);
+    if (!p) return;
+    p->connected = true;
+    broadcast_room_update();
 }
 
 void GameRoom::handle_disconnect(int player_id)
@@ -236,6 +279,8 @@ void GameRoom::handle_restart_game(int player_id)
     crime_weapon_.clear();
     crime_text_.clear();
     crime_eval_ = CrimeEvaluation{};
+    crime_score_revealed_ = false;
+    last_round_result_ = nullptr;
     pending_order_.clear();
     attempts_used_.clear();
     solved_at_attempt_.clear();
@@ -305,6 +350,8 @@ void GameRoom::start_round()
     crime_weapon_.clear();
     crime_text_.clear();
     crime_eval_ = CrimeEvaluation{};
+    crime_score_revealed_ = false;
+    last_round_result_ = nullptr;
     pending_order_.clear();
     attempts_used_.clear();
     solved_at_attempt_.clear();
@@ -414,6 +461,7 @@ void GameRoom::run_ai_judging()
                             {"evaluation", eval.evaluation},
                             {"key_facts", eval.key_facts}});
         crime_eval_ = std::move(eval);
+        crime_score_revealed_ = true;
         // The score alone (not the reasoning or key_facts, which could
         // hint at the answer) is revealed to everyone as soon as it's
         // known, rather than waiting for round_result — both the
@@ -651,7 +699,13 @@ void GameRoom::finish_round()
     // withheld from everyone but the criminal until round_result — see
     // run_ai_judging's private crime_answer_key message for why the
     // criminal already saw it earlier.
-    sender_.broadcast({{"type", "round_result"},
+    //
+    // Cached (not just broadcast) because round_result is a one-shot
+    // event: a player who reconnects during Result/NextRound would
+    // otherwise have no way to ever see this round's reveal, since it
+    // already went out once to whoever was connected at the time. See
+    // build_game_state_sync / docs/RECONNECT_DESIGN.md.
+    last_round_result_ = {{"type", "round_result"},
                {"round", round_number_},
                {"criminal_id", criminal_id_},
                {"crime_text", crime_text_},
@@ -663,7 +717,8 @@ void GameRoom::finish_round()
                {"evaluation", crime_eval_.evaluation},
                {"key_facts", crime_eval_.key_facts},
                {"scores_gained", gained_json},
-               {"total_scores", total_scores}});
+               {"total_scores", total_scores}};
+    sender_.broadcast(last_round_result_);
 
     if (criminal_queue_.empty()) {
         state_ = GameState::GameOver;
@@ -707,6 +762,54 @@ nlohmann::json GameRoom::build_score_breakdown_json() const
         breakdown_json.push_back({{"category", item.category}, {"score", item.score}, {"max", item.max}});
     }
     return breakdown_json;
+}
+
+nlohmann::json GameRoom::build_game_state_sync(int player_id) const
+{
+    const bool round_in_progress =
+        state_ == GameState::RoleAssignment || state_ == GameState::CrimeWriting ||
+        state_ == GameState::AIJudging || state_ == GameState::Investigation ||
+        state_ == GameState::Result || state_ == GameState::NextRound;
+
+    nlohmann::json sync = {
+        {"type", "game_state_sync"},
+        {"state", to_string(state_)},
+        {"round", round_number_},
+        {"role", round_in_progress ? nlohmann::json(player_id == criminal_id_ ? "criminal" : "detective") : nlohmann::json(nullptr)},
+        {"crime_score", crime_score_revealed_ ? nlohmann::json(crime_eval_.score) : nlohmann::json(nullptr)},
+        {"current_detective_id", nullptr},
+        {"current_attempt", nullptr},
+        {"answer_key", nullptr},
+        {"score_breakdown", nullptr},
+        // Result/NextRound already had their one-shot round_result
+        // broadcast go out to whoever was connected at the time — a
+        // reconnecting player missed it, so hand them the same payload
+        // again here rather than leaving them with nothing to look at.
+        {"round_result", (state_ == GameState::Result || state_ == GameState::NextRound) ? last_round_result_ : nlohmann::json(nullptr)},
+    };
+
+    if (state_ == GameState::Investigation && current_detective_ != -1) {
+        sync["current_detective_id"] = current_detective_;
+        int attempt = 1;
+        auto it = attempts_used_.find(current_detective_);
+        if (it != attempts_used_.end()) attempt = it->second + 1;
+        sync["current_attempt"] = attempt;
+    }
+
+    // Re-sends the same private answer key the criminal already got right
+    // after crime_score_revealed — crime_eval_ is still sitting in memory,
+    // no recomputation needed. Detectives never get this (see
+    // run_ai_judging's identical guard).
+    if (round_in_progress && player_id == criminal_id_ && crime_score_revealed_) {
+        nlohmann::json answer_key_json = nlohmann::json::array();
+        for (const auto& a : crime_eval_.answer_key) {
+            answer_key_json.push_back({{"aspect", a.aspect}, {"answer", a.answer}});
+        }
+        sync["answer_key"] = answer_key_json;
+        sync["score_breakdown"] = build_score_breakdown_json();
+    }
+
+    return sync;
 }
 
 nlohmann::json GameRoom::build_room_update() const

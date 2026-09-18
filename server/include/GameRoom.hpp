@@ -75,7 +75,30 @@ public:
     // (already in progress, or full).
     int handle_join(const std::string& name);
 
+    // The token generated for this player at handle_join time (see
+    // Player::token) — RoomManager fetches this right after a successful
+    // handle_join/create so GameServer can hand it to that player alone.
+    // Only ever call this for a player_id handle_join just returned.
+    std::string player_token(int player_id) const;
+
     void handle_disconnect(int player_id);
+
+    // Re-links a player who dropped and came back (see
+    // docs/RECONNECT_DESIGN.md). Caller (RoomManager::rejoin_room) has
+    // already verified the token; this just flips them back to connected
+    // and lets everyone know. Deliberately does not touch host_id_ — a
+    // host who reconnects does not get their seat back if it already
+    // succeeded to someone else.
+    void handle_reconnect(int player_id);
+
+    // True if `player_id` exists in this room and `token` matches theirs.
+    bool verify_rejoin(int player_id, const std::string& token) const;
+
+    // Everything a reconnecting client needs to redraw its UI as of right
+    // now, since replaying historical per-event messages doesn't work —
+    // each one assumes it just happened, in a specific order, and a
+    // reconnect can't guarantee either. See docs/RECONNECT_DESIGN.md.
+    nlohmann::json build_game_state_sync(int player_id) const;
 
     // Dispatches by msg["type"]. Called only for players that already
     // joined (i.e. have a player id).
@@ -158,6 +181,17 @@ private:
     std::string crime_weapon_;
     std::string crime_text_;
     CrimeEvaluation crime_eval_;
+    // Distinguishes "no evaluation yet" from "evaluated at score 0" —
+    // crime_eval_.score defaults to 0 too, so this flag is the only way to
+    // tell whether crime_score_revealed has actually gone out this round.
+    // Used by build_game_state_sync so a reconnecting player doesn't get
+    // told a score exists before it really does.
+    bool crime_score_revealed_ = false;
+    // The last round_result broadcast, cached verbatim so a player who
+    // reconnects during Result/NextRound can still see it — see
+    // finish_round(). Null before the first round ever finishes, or after
+    // a fresh start_round()/restart clears it.
+    nlohmann::json last_round_result_ = nullptr;
 
     std::deque<int> pending_order_;
     std::map<int, int> attempts_used_;

@@ -65,30 +65,50 @@ std::string RoomManager::generate_unique_code()
     return code;
 }
 
-std::pair<std::string, int> RoomManager::create_room(const std::shared_ptr<Session>& session, const std::string& name)
+JoinResult RoomManager::create_room(const std::shared_ptr<Session>& session, const std::string& name)
 {
     auto room = std::make_unique<Room>();
     room->sender = std::make_unique<RoomSender>(room->sessions);
     room->game_room = std::make_unique<GameRoom>(ioc_, data_, *room->sender, make_evaluator_(ioc_), make_judge_(ioc_));
 
     const int player_id = room->game_room->handle_join(name);
+    const std::string token = room->game_room->player_token(player_id);
     room->sessions[player_id] = session;
 
     const std::string code = generate_unique_code();
     rooms_[code] = std::move(room);
-    return {code, player_id};
+    return {code, player_id, token};
 }
 
-int RoomManager::join_room(const std::string& room_code, const std::shared_ptr<Session>& session, const std::string& name)
+std::optional<JoinResult> RoomManager::join_room(const std::string& room_code, const std::shared_ptr<Session>& session, const std::string& name)
 {
     auto it = rooms_.find(room_code);
-    if (it == rooms_.end()) return -1;
+    if (it == rooms_.end()) return std::nullopt;
 
     const int player_id = it->second->game_room->handle_join(name);
-    if (player_id == -1) return -1;
+    if (player_id == -1) return std::nullopt;
 
+    const std::string token = it->second->game_room->player_token(player_id);
     it->second->sessions[player_id] = session;
-    return player_id;
+    return JoinResult{room_code, player_id, token};
+}
+
+bool RoomManager::rejoin_room(const std::string& room_code, int player_id, const std::string& token,
+                               const std::shared_ptr<Session>& session)
+{
+    auto it = rooms_.find(room_code);
+    if (it == rooms_.end()) return false;
+    if (!it->second->game_room->verify_rejoin(player_id, token)) return false;
+
+    // Evict any still-live older connection for this player (e.g. a
+    // second tab left open) so only the new one can act as them.
+    auto old = it->second->sessions.find(player_id);
+    if (old != it->second->sessions.end() && old->second != session) {
+        old->second->close();
+    }
+    it->second->sessions[player_id] = session;
+    it->second->game_room->handle_reconnect(player_id);
+    return true;
 }
 
 void RoomManager::handle_message(const std::string& room_code, int player_id, const nlohmann::json& msg)
@@ -116,6 +136,13 @@ void RoomManager::send_room_snapshot(const std::string& room_code, int player_id
     auto it = rooms_.find(room_code);
     if (it == rooms_.end()) return;
     it->second->game_room->send_room_snapshot(player_id);
+}
+
+void RoomManager::send_game_state_sync(const std::string& room_code, int player_id)
+{
+    auto it = rooms_.find(room_code);
+    if (it == rooms_.end()) return;
+    it->second->sender->send(player_id, it->second->game_room->build_game_state_sync(player_id));
 }
 
 }

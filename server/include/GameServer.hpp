@@ -44,6 +44,7 @@ private:
 
     void handle_create_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg);
     void handle_join_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg);
+    void handle_rejoin(const std::shared_ptr<Session>& session, const nlohmann::json& msg);
 
     // Declared before room_manager_ so it's constructed first and outlives
     // every GameRoom, which holds a reference to it.

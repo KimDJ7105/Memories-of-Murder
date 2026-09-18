@@ -3,6 +3,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -29,6 +30,16 @@ using JudgeFactory = std::function<std::unique_ptr<IGuessJudge>(boost::asio::io_
 // scoped to just that room's sessions, so a broadcast from one room's
 // GameRoom can never reach a different room's players — GameRoom itself
 // still has no idea other rooms exist.
+// Returned by create_room/join_room on success — the token rides along so
+// GameServer can hand it to that player alone (see
+// docs/RECONNECT_DESIGN.md). Never broadcast anywhere; only ever sent to
+// the one session it was issued to.
+struct JoinResult {
+    std::string room_code;
+    int player_id;
+    std::string token;
+};
+
 class RoomManager {
 public:
     RoomManager(boost::asio::io_context& ioc,
@@ -37,14 +48,20 @@ public:
                 JudgeFactory make_judge);
     ~RoomManager();
 
-    // Creates a fresh room, joins `session` as its first player (always
-    // succeeds — a brand-new room is always empty and in Lobby), and
-    // returns {room_code, player_id}.
-    std::pair<std::string, int> create_room(const std::shared_ptr<Session>& session, const std::string& name);
+    // Creates a fresh room and joins `session` as its first player (always
+    // succeeds — a brand-new room is always empty and in Lobby).
+    JoinResult create_room(const std::shared_ptr<Session>& session, const std::string& name);
 
-    // Returns the assigned player id, or -1 if the code doesn't exist or
-    // the room refused the join (in progress, or full).
-    int join_room(const std::string& room_code, const std::shared_ptr<Session>& session, const std::string& name);
+    // nullopt if the code doesn't exist or the room refused the join (in
+    // progress, or full).
+    std::optional<JoinResult> join_room(const std::string& room_code, const std::shared_ptr<Session>& session, const std::string& name);
+
+    // Re-links `session` to an existing player_id after verifying `token`
+    // matches what that player was issued at join time. On success,
+    // evicts any still-live older session for that player_id (e.g. a
+    // second tab) before taking over. See docs/RECONNECT_DESIGN.md.
+    bool rejoin_room(const std::string& room_code, int player_id, const std::string& token,
+                      const std::shared_ptr<Session>& session);
 
     void handle_message(const std::string& room_code, int player_id, const nlohmann::json& msg);
 
@@ -52,6 +69,7 @@ public:
     void handle_disconnect(const std::string& room_code, int player_id);
 
     void send_room_snapshot(const std::string& room_code, int player_id);
+    void send_game_state_sync(const std::string& room_code, int player_id);
 
 private:
     struct Room;

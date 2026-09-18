@@ -270,6 +270,23 @@ let crimeTimerInterval = null;
 let guessTimerInterval = null;
 let roundGuessLogHtml = [];
 
+// Reconnect support (docs/RECONNECT_DESIGN.md). Saved right after a
+// successful create_room/join_room and sent back verbatim in a `rejoin`
+// message if the page reloads (F5, accidental back button + quick
+// return). The token is what stops another player in the room from just
+// guessing a small player_id and hijacking that seat.
+const SESSION_KEY = 'mom_session';
+function saveSession(roomCode, playerId, token) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode, playerId, token })); } catch (e) {}
+}
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (e) { return null; }
+}
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+let rejoinAttempted = false;
+
 function connect() {
   // Same host the page itself was loaded from, not a hardcoded
   // "localhost" — so this file works unmodified whether it's opened
@@ -280,7 +297,21 @@ function connect() {
   // player. The WS port itself still has to match main.cpp's fixed 9002.
   const wsHost = location.hostname || 'localhost';
   ws = new WebSocket(`ws://${wsHost}:9002`);
-  ws.onopen = () => { $('connection').textContent = '연결됨'; $('connection').className = 'ok'; };
+  ws.onopen = () => {
+    $('connection').textContent = '연결됨'; $('connection').className = 'ok';
+    const session = loadSession();
+    if (session && session.roomCode && session.playerId && session.token) {
+      // Set myId immediately rather than waiting for the server's
+      // "rejoined" ack — a room_update broadcast triggered by our own
+      // reconnect can arrive before that ack does (the server tells
+      // everyone else "this player is back" as part of processing the
+      // rejoin, before it gets around to replying to us specifically),
+      // and is_host / "whose turn" checks need myId to already be right.
+      myId = session.playerId;
+      rejoinAttempted = true;
+      send({ type: 'rejoin', room_code: session.roomCode, player_id: session.playerId, token: session.token });
+    }
+  };
   ws.onclose = () => { $('connection').textContent = '연결 끊김'; $('connection').className = 'bad'; };
   ws.onerror = () => { $('connection').textContent = '연결 오류'; $('connection').className = 'bad'; };
   ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
@@ -288,15 +319,39 @@ function connect() {
 
 function send(msg) { ws.send(JSON.stringify(msg)); }
 
+// Applied to any user-controlled or AI-derived text before it goes into
+// innerHTML/insertAdjacentHTML — nicknames, guess text, the crime
+// confession, and AI evaluation/answer text can all contain characters
+// that would otherwise be interpreted as markup. See docs/RECONNECT_DESIGN.md
+// ("부수 작업") for the specific injection points this was written for.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function handleMessage(msg) {
   log('<- ' + JSON.stringify(msg));
   switch (msg.type) {
     case 'room_created':
     case 'joined':
       myId = msg.player_id;
+      saveSession(msg.room_code, msg.player_id, msg.token);
       $('room-code-display').textContent = `방 코드: ${msg.room_code}`;
       show('lobby-screen');
       hide('join-screen');
+      break;
+    case 'rejoined':
+      // myId was already set from the saved session when we sent the
+      // rejoin (see connect()'s onopen) - nothing else to do here besides
+      // leaving the join screen. room_update/board_info/game_state_sync
+      // (which may have already arrived, or may still be coming) do the
+      // rest of the work of putting the right screen on top.
+      rejoinAttempted = false;
+      hide('join-screen');
+      break;
+    case 'game_state_sync':
+      applyGameStateSync(msg);
       break;
     case 'room_update':
       players = msg.players;
@@ -393,8 +448,26 @@ function handleMessage(msg) {
     case 'game_over':
       show('gameover-screen'); hide('result-screen');
       renderGameOver(msg);
+      // Deliberately NOT clearing the saved session here: restart_game
+      // reuses this same room (same player_id/token, state reset to
+      // Lobby) rather than creating a new one, so a reload after the
+      // host restarts still needs to be able to rejoin. If this room
+      // really is done for good, the next rejoin attempt (whenever that
+      // happens) will fail once the room is torn down, and that failure
+      // path is what actually clears it (see the `error` case below).
       break;
     case 'error':
+      if (rejoinAttempted) {
+        // The saved session is no good anymore (room gone, wrong token,
+        // etc.) - drop it and fall back to the normal join screen instead
+        // of leaving the player stuck on a blank page forever.
+        rejoinAttempted = false;
+        clearSession();
+        myId = null;
+        show('join-screen');
+        log('!! 재접속 실패: ' + msg.message);
+        break;
+      }
       log('!! ' + msg.message);
       alert(msg.message);
       // If a guess got rejected (e.g. a rare permission check) after
@@ -406,6 +479,79 @@ function handleMessage(msg) {
         show('guess-text'); show('submit-guess-btn');
       }
       break;
+  }
+}
+
+// Rebuilds the UI directly from the server's current state after a
+// reconnect, rather than relying on the normal sequence of per-event
+// messages (round_start/your_role/investigation_turn_start/...) — those
+// each assume they just happened in order, which a reconnect can't
+// guarantee (see docs/RECONNECT_DESIGN.md).
+function applyGameStateSync(msg) {
+  roomState = msg.state;
+  myRole = msg.role;
+
+  hide('crime-writing-box'); hide('investigation-box'); hide('advance-box');
+  hide('waiting-box'); hide('score-preview'); hide('criminal-answer-panel'); hide('guess-loading');
+  stopCrimeTimer(); stopGuessTimer();
+
+  if (msg.state === 'Lobby' || msg.state === 'GameOver') {
+    // room_update's own handling already shows the right screen for these.
+    return;
+  }
+
+  if ((msg.state === 'Result' || msg.state === 'NextRound') && msg.round_result) {
+    // round_result is a one-shot broadcast a reconnecting player missed
+    // entirely - the server resends the same payload here (see
+    // GameRoom::build_game_state_sync), so just reuse the normal
+    // rendering path instead of a generic placeholder.
+    show('result-screen'); hide('round-screen'); hide('lobby-screen'); hide('gameover-screen');
+    renderRoundResult(msg.round_result);
+    renderNextRoundBox();
+    return;
+  }
+
+  show('round-screen'); hide('lobby-screen'); hide('result-screen'); hide('gameover-screen');
+  $('round-title').textContent = `라운드 ${msg.round}`;
+
+  const banner = $('role-banner');
+  if (msg.role) {
+    banner.textContent = msg.role === 'criminal' ? '당신은 범인입니다' : '당신은 탐정입니다';
+    banner.className = 'role-banner ' + msg.role;
+  }
+
+  if (msg.crime_score !== null && msg.crime_score !== undefined) {
+    $('score-preview').textContent = `이번 범행의 AI 평가 점수: ${msg.crime_score}점`;
+    show('score-preview');
+  }
+
+  if (msg.answer_key) {
+    renderCriminalAnswerKey({ answer_key: msg.answer_key, score_breakdown: msg.score_breakdown });
+  }
+
+  if (msg.state === 'CrimeWriting' && msg.role === 'criminal') {
+    show('crime-writing-box');
+    // Not attempting to restore the exact remaining time here (the
+    // server enforces the real deadline regardless) - see
+    // docs/RECONNECT_DESIGN.md's explicitly-scoped simplification.
+  } else if (msg.state === 'Investigation') {
+    currentDetectiveId = msg.current_detective_id;
+    if (msg.current_detective_id === myId) {
+      show('investigation-box');
+      $('turn-banner').textContent = `당신의 차례입니다 (${msg.current_attempt}번째 시도 / 최대 3회)`;
+    } else {
+      show('waiting-box');
+      const name = players.find(p => p.id === msg.current_detective_id)?.name ?? msg.current_detective_id;
+      // .textContent below already renders this literally (no HTML
+      // interpretation either way), so no escapeHtml() needed here.
+      $('waiting-message').textContent = `${name} 탐정의 차례입니다 (${msg.current_attempt}번째 시도)`;
+    }
+  } else {
+    // AIJudging / Result / NextRound: nothing for this player to actively
+    // do right now: round_result (already broadcast, or about to be) and
+    // the normal handlers take it from here.
+    show('waiting-box');
+    $('waiting-message').textContent = '진행 상황을 기다리는 중...';
   }
 }
 
@@ -461,7 +607,7 @@ function renderPlayers() {
     if (p.id === currentDetectiveId && roomState === 'Investigation') badges.push('<span class="badge turn">차례</span>');
     if (p.has_been_criminal) badges.push('<span class="badge">범인 완료</span>');
     if (!p.connected) badges.push('<span class="badge">연결 끊김</span>');
-    return `<li><span>${p.name}</span><span>${p.score}점 ${badges.join('')}</span></li>`;
+    return `<li><span>${escapeHtml(p.name)}</span><span>${p.score}점 ${badges.join('')}</span></li>`;
   }).join('');
   $('players').innerHTML = list;
   $('players-round').innerHTML = list;
@@ -475,10 +621,10 @@ function renderPlayers() {
 function appendLogEntry(msg) {
   const name = players.find(p => p.id === msg.player_id)?.name ?? msg.player_id;
   const aspects = msg.aspects.map(a => `<span>${a.aspect}: ${a.verdict}</span>`).join('');
-  const guessLine = msg.timed_out ? '(시간 초과 - 응답 없음)' : `"${msg.guess_text}"`;
+  const guessLine = msg.timed_out ? '(시간 초과 - 응답 없음)' : `"${escapeHtml(msg.guess_text)}"`;
   const html = `
     <div class="log-entry${msg.correct ? ' correct' : ''}">
-      <div><span class="who">${name}</span> (${msg.attempt}번째 시도) — ${msg.correct ? '정답' : '오답'}</div>
+      <div><span class="who">${escapeHtml(name)}</span> (${msg.attempt}번째 시도) — ${msg.correct ? '정답' : '오답'}</div>
       <div>${guessLine}</div>
       <div class="aspects">${aspects}</div>
     </div>
@@ -520,7 +666,7 @@ function renderCriminalAnswerKey(msg) {
       <div class="cat-track"><div class="cat-fill" style="width:${pct}%"></div></div>
     </li>`;
   }).join('');
-  const answers = (msg.answer_key || []).map(a => `<li><b>${a.aspect}:</b> ${a.answer}</li>`).join('');
+  const answers = (msg.answer_key || []).map(a => `<li><b>${a.aspect}:</b> ${escapeHtml(a.answer)}</li>`).join('');
   $('criminal-breakdown').innerHTML = breakdown;
   $('criminal-answer-key').innerHTML = answers;
   show('criminal-answer-panel');
@@ -572,7 +718,7 @@ function stopGuessTimer() {
 function renderRoundResult(msg) {
   const gained = Object.entries(msg.scores_gained).map(([id, amt]) => {
     const p = players.find(pl => String(pl.id) === id);
-    return `<li>${p ? p.name : id}: +${amt}점</li>`;
+    return `<li>${escapeHtml(p ? p.name : id)}: +${amt}점</li>`;
   }).join('');
   const breakdown = (msg.score_breakdown || []).map(item => {
     const pct = item.max > 0 ? Math.round((item.score / item.max) * 100) : 0;
@@ -582,12 +728,12 @@ function renderRoundResult(msg) {
     </li>`;
   }).join('');
   $('result-body').innerHTML = `
-    <p><b>범인:</b> ${players.find(p => p.id === msg.criminal_id)?.name ?? msg.criminal_id}</p>
+    <p><b>범인:</b> ${escapeHtml(players.find(p => p.id === msg.criminal_id)?.name ?? msg.criminal_id)}</p>
     <p><b>장소:</b> ${msg.location} / <b>흉기:</b> ${msg.weapon}</p>
-    <p><b>범행 전문:</b> ${msg.crime_text}</p>
+    <p><b>범행 전문:</b> ${escapeHtml(msg.crime_text)}</p>
     <p><b>범행 총점:</b> ${msg.crime_score} / 100</p>
     <ul class="score-breakdown">${breakdown}</ul>
-    <p><b>총평:</b> ${msg.evaluation}</p>
+    <p><b>총평:</b> ${escapeHtml(msg.evaluation)}</p>
     <ul>${gained}</ul>
     <h3>이번 라운드의 추리들</h3>
     <div id="result-guess-log">${roundGuessLogHtml.join('') || '<p>제출된 추리가 없습니다.</p>'}</div>
@@ -600,7 +746,7 @@ function renderGameOver(msg) {
     .map(([id, score]) => {
       const p = players.find(pl => String(pl.id) === id);
       const win = String(msg.winner_id) === id ? ' 🏆' : '';
-      return `<li>${p ? p.name : id}: ${score}점${win}</li>`;
+      return `<li>${escapeHtml(p ? p.name : id)}: ${score}점${win}</li>`;
     }).join('');
   $('gameover-body').innerHTML = `<ul>${rows}</ul>`;
   $('restart-btn').hidden = !players.find(p => p.id === myId)?.is_host;

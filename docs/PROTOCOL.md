@@ -15,13 +15,16 @@
 | `submit_guess` | `text` | 현재 차례인 탐정만, `Investigation` 상태에서만 허용. 이전 제출이 아직 AI 판정 중이면(`guess_pending`을 받은 뒤 `guess_feedback`이 오기 전) 거부됨. `kGuessSeconds`(45초) 안에 제출하지 않으면 서버가 자동으로 오답 처리한다 |
 | `next_turn` | - | 방금 추리를 제출한 탐정 본인 또는 방장만, `guess_feedback`이 온 뒤(`awaiting_advance_`)에만 허용. 자동 전환 타이머는 없음 — 방장을 허용하는 건 답변자가 자리를 비웠을 때 게임이 멈추지 않게 하기 위한 대비책 |
 | `next_round` | - | 방장만 가능, `NextRound` 상태에서만 허용. 자동 전환 타이머는 없음 |
+| `rejoin` | `room_code`, `player_id`, `token` | `create_room`/`join_room`처럼 아직 방에 속하지 않은 세션만 보낼 수 있음(둘과 마찬가지로 그 전까지는 다른 메시지가 전부 거부됨). `room_created`/`joined` 때 받은 `token`이 그 방의 그 `player_id`와 일치해야 성공. 성공 시 `rejoined` 응답 + `room_update`/`board_info`/`game_state_sync`, 실패 시 `error`. 자세한 설계는 `docs/RECONNECT_DESIGN.md` 참고 |
 
 ## Server → Client
 
 | type | 필드 | 설명 |
 |---|---|---|
-| `room_created` | `room_code`, `player_id` | `create_room` 성공 응답. 이 방 코드를 다른 플레이어에게 알려줘야 같이 플레이할 수 있다 |
-| `joined` | `room_code`, `player_id` | `join_room` 성공 응답 |
+| `room_created` | `room_code`, `player_id`, `token` | `create_room` 성공 응답. `room_code`는 다른 플레이어에게 알려줘야 같이 플레이할 수 있고, `token`은 이 플레이어 본인만 알아야 하는 재접속용 비밀값(다른 어떤 메시지에도 절대 다시 실리지 않음) |
+| `joined` | `room_code`, `player_id`, `token` | `join_room` 성공 응답. `token` 설명은 위와 동일 |
+| `rejoined` | `room_code`, `player_id` | `rejoin` 성공 응답. 이 직후(또는 그 전에, 순서를 보장하지 않음 — 아래 참고) `room_update`/`board_info`/`game_state_sync`가 뒤따른다 |
+| `game_state_sync` | `state`, `round`, `role`, `crime_score`, `current_detective_id`, `current_attempt`, `answer_key`, `score_breakdown`, `round_result` | `rejoin` 성공 시에만 전송. 일반적인 이벤트 메시지들을 순서대로 재생하는 대신, 지금 이 순간의 상태를 있는 그대로 담아 클라이언트가 화면을 한 번에 재구성하게 한다. `role`은 게임이 진행 중이 아니면(`Lobby`/`GameOver`) null. `state`가 `Investigation`이 아니면 `current_detective_id`/`current_attempt`는 null. `role`이 `criminal`이 아니거나 아직 평가가 공개되지 않았으면 `answer_key`/`score_breakdown`은 null. `state`가 `Result`/`NextRound`가 아니면 `round_result`는 null — 그 두 상태일 땐 이미 한 번 나갔던(놓쳤을 수 있는) `round_result`와 완전히 같은 내용을 통째로 다시 담아 보낸다(단, 그 라운드의 탐정별 추리 로그까지 복원하지는 않는다 — 클라이언트가 그동안 쌓아온 화면상의 기록일 뿐 서버가 따로 저장해두지 않기 때문) |
 | `board_info` | `available_maps[{id,name}]`, `map{id,name,image,surveillance_label}`, `rooms[{id,name,surveilled}]`, `edges[[id,id]]`, `weapons[{id,name}]` | 입장 시 및 방장이 `select_map`으로 지도를 바꿀 때마다 전송. `available_maps`는 고를 수 있는 모든 지도 목록, `map`/`rooms`/`edges`는 현재 선택된 지도, `image`는 그 지도의 이미지를 담은 `data:` URI(`<img src>`에 바로 사용 가능) 또는 이미지가 없으면 null. `surveillance_label`은 이 지도의 감시 시스템을 부르는 이름("CCTV", "당직 선원" 등)이고 그런 시스템이 없는 지도면 null. `rooms[].surveilled`가 true인 방은 항상 감시되는 위험 구역이며(로비 때부터 공개된 정보), 지도 이미지에도 표시되어 있다. `weapons`는 전체 흉기 목록이 아니라 **이 지도에서만 쓸 수 있는 흉기 부분집합**이다 |
 | `room_update` | `state`, `round`, `players[]` | 플레이어 목록/점수/상태가 바뀔 때마다 전체 브로드캐스트 |
 | `round_start` | `round`, `crime_writing_seconds` | 새 라운드 시작 알림. 장소/무기는 이번 라운드에도 범인이 자유롭게 고르므로 여기엔 포함되지 않음. `crime_writing_seconds`는 범인이 범행을 작성할 수 있는 제한 시간(초) — 클라이언트가 카운트다운을 보여주기 위한 값일 뿐, 실제 마감은 서버가 별도로 강제한다 |
@@ -36,6 +39,16 @@
 | `error` | `message` | 잘못된 상태/권한의 요청에 대한 거부 응답 |
 
 `score_breakdown`은 `[{"category": "장소/환경 일치성", "score": 20, "max": 25}, ...]` 형태의 배열로, `docs/DESIGN.md` 7장의 평가 기준 다섯 항목(장소/환경 일치성 25점, 이동 및 실행 가능성 20점, 무기 사용의 개연성 20점, 범행 과정의 개연성 20점, 증거/무기 은닉의 개연성 15점)을 항상 이 순서 그대로 담는다. `crime_score`는 이 다섯 항목 점수의 합과 항상 정확히 일치한다 — AI가 총점을 별도로 지어내지 않고 서버가 `score_breakdown`을 합산해서 계산하기 때문(`OllamaCrimeEvaluator::parse_evaluation` 참고). `score_breakdown`은 범인에게는 `crime_answer_key`로 먼저 공개되고, 나머지 전원에게는 `round_result`에서만 공개된다.
+
+## 재접속 (Reconnect)
+
+전체 설계 배경과 왜 이렇게 했는지는 `docs/RECONNECT_DESIGN.md`에 있다. 프로토콜 관점에서 알아야 할 것만 정리하면:
+
+- **범위**: 게임이 시작된 이후(로비 이후)만 대상. 로비 상태에서 끊긴 플레이어는 `players_` 목록에서 아예 제거되므로 재접속 대상이 아니다 — 그냥 같은 방 코드로 새로 들어오면 된다.
+- **토큰은 방 전체 브로드캐스트(`room_update` 등)에 절대 포함되지 않는다** — `room_created`/`joined`로 그 세션에게 딱 한 번만 전달된다.
+- **방장 자리는 재접속으로 되찾을 수 없다.** 방장이 끊기면 즉시 다른 접속 중인 플레이어에게 넘어가고(기존 Phase 5 로직), 원래 방장이 재접속해도 그 자리를 돌려받지 못한다.
+- **같은 플레이어로 두 번째 연결이 들어오면 새 연결이 이긴다** — 기존 소켓이 아직 살아있어도 서버가 강제로 닫는다.
+- **메시지 순서를 엄격히 보장하지 않는다**: `rejoin`이 성공하면 서버 내부적으로 그 플레이어를 다시 연결시키는 과정에서 `room_update`가 먼저 브로드캐스트되고, 그다음 `rejoined` 응답, 그리고 `room_update`/`board_info`/`game_state_sync`가 뒤따를 수 있다. 클라이언트는 `rejoined`가 반드시 첫 메시지라고 가정하면 안 되고(실제로 `myId`는 `rejoin`을 보내는 시점에 이미 로컬에 저장해둔 값으로 설정해야 한다), 대신 `game_state_sync`가 도착하면 그걸로 화면을 확정적으로 맞춘다.
 
 ## 여러 방 운영 (RoomManager)
 

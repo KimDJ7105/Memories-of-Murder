@@ -96,8 +96,10 @@ void GameServer::on_message(const std::shared_ptr<Session>& session, const std::
             handle_create_room(session, msg);
         } else if (type == "join_room") {
             handle_join_room(session, msg);
+        } else if (type == "rejoin") {
+            handle_rejoin(session, msg);
         } else {
-            session->send({{"type", "error"}, {"message", "create_room 또는 join_room 메시지가 필요합니다."}});
+            session->send({{"type", "error"}, {"message", "create_room, join_room 또는 rejoin 메시지가 필요합니다."}});
         }
         return;
     }
@@ -108,15 +110,20 @@ void GameServer::on_message(const std::shared_ptr<Session>& session, const std::
 void GameServer::handle_create_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg)
 {
     const std::string name = msg.value("name", "");
-    const auto [room_code, player_id] = room_manager_.create_room(session, name);
+    const JoinResult result = room_manager_.create_room(session, name);
 
-    session->set_room_code(room_code);
-    session->set_player_id(player_id);
-    session->send({{"type", "room_created"}, {"room_code", room_code}, {"player_id", player_id}});
+    session->set_room_code(result.room_code);
+    session->set_player_id(result.player_id);
+    // The token goes out once, here, to this player alone — see
+    // docs/RECONNECT_DESIGN.md. It never appears in any broadcast.
+    session->send({{"type", "room_created"},
+                    {"room_code", result.room_code},
+                    {"player_id", result.player_id},
+                    {"token", result.token}});
     // create_room already broadcast a room_update inside GameRoom, but
     // that happened before this session was registered above, so this
     // player (the only one in the room so far) missed it.
-    room_manager_.send_room_snapshot(room_code, player_id);
+    room_manager_.send_room_snapshot(result.room_code, result.player_id);
 }
 
 void GameServer::handle_join_room(const std::shared_ptr<Session>& session, const nlohmann::json& msg)
@@ -124,18 +131,41 @@ void GameServer::handle_join_room(const std::shared_ptr<Session>& session, const
     const std::string room_code = msg.value("room_code", "");
     const std::string name = msg.value("name", "");
 
-    const int player_id = room_manager_.join_room(room_code, session, name);
-    if (player_id == -1) {
+    const std::optional<JoinResult> result = room_manager_.join_room(room_code, session, name);
+    if (!result) {
         session->send({{"type", "error"}, {"message", "방을 찾을 수 없거나 입장할 수 없습니다 (게임 진행 중이거나 인원이 가득 찼습니다)."}});
+        return;
+    }
+
+    session->set_room_code(result->room_code);
+    session->set_player_id(result->player_id);
+    session->send({{"type", "joined"},
+                    {"room_code", result->room_code},
+                    {"player_id", result->player_id},
+                    {"token", result->token}});
+    // Same reasoning as handle_create_room: this player's own session
+    // wasn't registered yet when GameRoom broadcast its own room_update.
+    room_manager_.send_room_snapshot(result->room_code, result->player_id);
+}
+
+void GameServer::handle_rejoin(const std::shared_ptr<Session>& session, const nlohmann::json& msg)
+{
+    const std::string room_code = msg.value("room_code", "");
+    const int player_id = msg.value("player_id", -1);
+    const std::string token = msg.value("token", "");
+
+    if (!room_manager_.rejoin_room(room_code, player_id, token, session)) {
+        session->send({{"type", "error"}, {"message", "재접속할 수 없습니다. 방이 사라졌거나 정보가 일치하지 않습니다."}});
         return;
     }
 
     session->set_room_code(room_code);
     session->set_player_id(player_id);
-    session->send({{"type", "joined"}, {"room_code", room_code}, {"player_id", player_id}});
-    // Same reasoning as handle_create_room: this player's own session
-    // wasn't registered yet when GameRoom broadcast its own room_update.
+    session->send({{"type", "rejoined"}, {"room_code", room_code}, {"player_id", player_id}});
+    // room_update/board_info first (roster, scores, map, weapons), then
+    // the round-specific context a plain snapshot can't express.
     room_manager_.send_room_snapshot(room_code, player_id);
+    room_manager_.send_game_state_sync(room_code, player_id);
 }
 
 void GameServer::on_disconnect(const std::shared_ptr<Session>& session)
